@@ -71,7 +71,11 @@ list(FILTER HOST_SOURCES EXCLUDE REGEX "/src/(game|versus)/")
 # Windows only: the D3D12 renderer and what serves it, XAudio2, the runtime compiler, splash and handover windows,
 # the main window (src/port/main.cpp has the SDL one)
 list(FILTER HOST_SOURCES EXCLUDE REGEX
-    "/src/(gpu/(d3d12|pipeline_cache|texturedumper)|audio/(xaudio2|voice|voice_link)|core/gyro|app/(main|game_code|handover|splash|cursor|focus_pause))\\.cpp$")
+    "/src/(gpu/(d3d12|pipeline_cache|texturedumper)|audio/(xaudio2|voice|voice_link)|app/(main|game_code|handover|splash|cursor|focus_pause))\\.cpp$")
+# gyro.cpp reads SDL3's sensors, or libnx's on the Switch: elsewhere stubs.cpp answers for it
+if(NOT SCDA_SWITCH)
+    list(FILTER HOST_SOURCES EXCLUDE REGEX "/src/core/gyro\\.cpp$")
+endif()
 if(SCDA_SWITCH)
     list(FILTER HOST_SOURCES EXCLUDE REGEX "/src/port/linux_.*\\.cpp$")
 else()

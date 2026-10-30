@@ -356,7 +356,9 @@ bool PortHides(int id) {
     bool d3d12_only = id == kShaderModel || id == kHdr || id == kToneMapping || id == kAmbientOcclusion ||
                       id == kMsaa || id == kShadowFilter || id == kHdrOutput;
 #ifdef SCDA_SWITCH
-    return d3d12_only || id == kDisplayMode || id == kMonitor;
+    // the gyro button rows offer a touchpad, misc and paddles, which the Switch's controllers have not
+    return d3d12_only || id == kDisplayMode || id == kMonitor || id == kGyroButton || id == kGyroButtonMode ||
+           id == kGyroRecenter;
 #else
     return d3d12_only || id == kSwapAB || id == kSwapXY;
 #endif

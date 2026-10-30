@@ -1,5 +1,6 @@
 // Gyro aiming: the controller's gyro turns the view like a mouse, beside the right stick.
-// SDL's thread reads every reading as it arrives; the game takes the turn gathered since its last look update.
+// SDL's thread reads every reading as it arrives; the game takes the turn gathered since its last look update. On the
+// Switch, whose SDL2 has no sensors, libnx's six-axis readings since the last look update are taken with it instead.
 #include "core/gyro.h"
 
 #include <algorithm>
@@ -8,7 +9,11 @@
 #include <iterator>
 #include <mutex>
 
+#ifdef SCDA_SWITCH
+#include <switch.h>
+#else
 #include <SDL3/SDL.h>
+#endif
 
 #include "core/log.h"
 
@@ -32,6 +37,7 @@ constexpr float kMaxDrift = 1.5f;  // degrees a second
 constexpr float kSmoothSpeed = 5.0f;  // degrees a second
 constexpr float kSmoothSeconds = 0.1f;
 
+#ifndef SCDA_SWITCH
 // kButtonNames in order
 constexpr SDL_GamepadButton kButtons[] = {
     SDL_GAMEPAD_BUTTON_INVALID,       SDL_GAMEPAD_BUTTON_TOUCHPAD,      SDL_GAMEPAD_BUTTON_MISC1,
@@ -39,6 +45,7 @@ constexpr SDL_GamepadButton kButtons[] = {
     SDL_GAMEPAD_BUTTON_LEFT_PADDLE2};
 static_assert(std::size(kButtons) == std::size(kButtonNames));
 static_assert(SDL_GAMEPAD_BUTTON_COUNT <= 32);
+#endif
 
 // SDL's axes: x right, y up out of the face, z toward the player
 struct Vec3 {
@@ -96,7 +103,7 @@ struct RestWindow {
 
 // the controller aiming: the first whose gyro reports, until it is unplugged
 struct Motion {
-    SDL_JoystickID pad = 0;
+    uint32_t pad = 0;  // SDL's joystick id; on the Switch 1 once a reading came
     uint64_t gyro_ns = 0;  // sensor clock of the last readings
     uint64_t accel_ns = 0;
     Vec3 gravity;  // smoothed accelerometer, pointing up
@@ -179,6 +186,77 @@ void ReadGyro(Motion& m, const Vec3& radians, uint64_t ns) {
     m.pitch -= turn.x * dt;  // turning about x raises the controller's front
 }
 
+uint64_t NowNs() {
+#ifdef SCDA_SWITCH
+    return armTicksToNs(armGetSystemTick());
+#else
+    return SDL_GetTicksNS();
+#endif
+}
+
+#ifdef SCDA_SWITCH
+// Player 1's controller: the console's Joy-Con in handheld, a Pro Controller, or the right Joy-Con of a pair
+constexpr float kTwoPi = 6.2831853f;
+constexpr float kGravity = 9.80665f;  // metres a second squared
+
+struct Sensors {
+    HidSixAxisSensorHandle handheld{}, full{}, dual[2]{};
+    bool started = false;
+    uint32_t current = 0;  // the handle read last (type_value): another controller starts the clock afresh
+    uint64_t sampling = 0;  // the last reading taken
+    uint64_t clock = 0;  // the readings' own, their delta times summed
+};
+Sensors g_sensors;
+
+void StartSensors() {
+    Sensors& s = g_sensors;
+    if (s.started) return;
+    hidGetSixAxisSensorHandles(&s.handheld, 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
+    hidGetSixAxisSensorHandles(&s.full, 1, HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey);
+    hidGetSixAxisSensorHandles(s.dual, 2, HidNpadIdType_No1, HidNpadStyleTag_NpadJoyDual);
+    for (HidSixAxisSensorHandle h : {s.handheld, s.full, s.dual[0], s.dual[1]}) hidStartSixAxisSensor(h);
+    s.started = true;
+    LOGR("gyro: six-axis sensors on");
+}
+
+// Nintendo's axes are x right, y forward, z up out of the face; SDL's, which all of the above uses, x right, y up out
+// of the face, z toward the player. A rotation, no mirror, so readings and turns map alike
+Vec3 FromNintendo(const HidVector& v, float scale) { return {v.x * scale, v.z * scale, -v.y * scale}; }
+
+// every reading since the last call; angular velocity in turns a second, acceleration in g
+void Poll(Motion& m) {
+    StartSensors();
+    Sensors& s = g_sensors;
+    HidSixAxisSensorHandle h{};
+    uint32_t style = hidGetNpadStyleSet(HidNpadIdType_No1);
+    if (hidGetNpadStyleSet(HidNpadIdType_Handheld) & HidNpadStyleTag_NpadHandheld) h = s.handheld;
+    else if (style & HidNpadStyleTag_NpadFullKey) h = s.full;
+    else if (style & HidNpadStyleTag_NpadJoyDual) h = s.dual[1];
+    else return;
+    if (h.type_value != s.current) {
+        s.current = h.type_value;
+        s.sampling = 0;
+        m.gyro_ns = m.accel_ns = 0;
+    }
+    HidSixAxisSensorState states[32];
+    size_t n = hidGetSixAxisSensorStates(h, states, std::size(states));
+    std::sort(states, states + n, [](const HidSixAxisSensorState& a, const HidSixAxisSensorState& b) {
+        return a.sampling_number < b.sampling_number;
+    });
+    for (size_t i = 0; i < n; i++) {
+        const HidSixAxisSensorState& r = states[i];
+        if (!(r.attributes & HidSixAxisSensorAttribute_IsConnected) || r.sampling_number <= s.sampling) continue;
+        s.sampling = r.sampling_number;
+        s.clock += r.delta_time;
+        m.pad = 1;
+        ReadAccel(m, FromNintendo(r.acceleration, kGravity), s.clock);
+        ReadGyro(m, FromNintendo(r.angular_velocity, kTwoPi), s.clock);
+    }
+}
+
+// the gyro button rows name buttons the Switch's controllers have not: none, the gyro always on
+uint32_t ButtonBit(uint32_t) { return 0; }
+#else
 void ReadSensor(Motion& m, const SDL_GamepadSensorEvent& s) {
     if (!m.pad && s.sensor == SDL_SENSOR_GYRO) m.pad = s.which;
     if (s.which != m.pad) return;
@@ -244,6 +322,7 @@ uint32_t ButtonBit(uint32_t index) {
     if (index == 0 || index >= std::size(kButtons)) return 0;
     return 1u << kButtons[index];
 }
+#endif
 
 // the gyro button: off or on while held, or a press flips it; no button keeps the gyro on
 bool UpdateSwitch(const Settings& s, const Motion& m) {
@@ -267,12 +346,17 @@ float AxisTurn(const Motion& m, uint32_t axis) {
 Turn Take(const Settings& s) {
     static uint64_t last_take = 0;
     if (!s.enabled) return {};
+#ifndef SCDA_SWITCH
     EnsureSensors();
-    uint64_t now = SDL_GetTicksNS();
+#endif
+    uint64_t now = NowNs();
     bool stale = now - last_take > kStaleNs;
     last_take = now;
     std::lock_guard lock(g_lock);
     Motion& m = g_motion;
+#ifdef SCDA_SWITCH
+    Poll(m);
+#endif
     Turn turn;
     if (stale) m.pressed = 0;  // presses while the look did not run
     bool on = UpdateSwitch(s, m);
