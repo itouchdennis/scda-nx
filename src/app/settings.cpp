@@ -83,6 +83,14 @@ Settings& Get() {
     return s;
 }
 
+bool LoggingWanted() {
+    try {
+        return toml::parse_file(File().string())["logging"].value_or(Settings{}.logging);
+    } catch (...) {
+        return Settings{}.logging;
+    }
+}
+
 void Load() {
     Settings& s = Get();
     toml::table t;
@@ -123,6 +131,7 @@ void Load() {
     s.ambient_occlusion = std::min(t["ambient_occlusion"].value_or(s.ambient_occlusion), 2u);
     s.async_shaders = t["async_shaders"].value_or(s.async_shaders);
     s.reverb = t["reverb"].value_or(s.reverb);
+    s.logging = t["logging"].value_or(s.logging);
     s.custom_textures = t["custom_textures"].value_or(s.custom_textures);
     s.dump_textures = t["dump_textures"].value_or(s.dump_textures);
     s.texture_dump_format = std::min(t["texture_dump_format"].value_or(s.texture_dump_format), 1u);
@@ -207,6 +216,7 @@ toml::table Table() {
                   {"ambient_occlusion", int64_t(s.ambient_occlusion)},
                   {"async_shaders", s.async_shaders},
                   {"reverb", s.reverb},
+                  {"logging", s.logging},
                   {"custom_textures", s.custom_textures},
                   {"dump_textures", s.dump_textures},
                   {"texture_dump_format", int64_t(s.texture_dump_format)},

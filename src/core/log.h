@@ -19,12 +19,11 @@ void Flush();
 bool TryFlush();
 const std::string& Path();
 
-// SCDA_VERBOSE_LOG: a release build with the debug log (the port's console tests, where the log is all there is)
-#if defined(NDEBUG) && !defined(SCDA_VERBOSE_LOG)
-inline constexpr bool kVerbose = false;
-#else
-inline constexpr bool kVerbose = true;
-#endif
+// The full log (debug builds, and SCDA_VERBOSE_LOG release builds) or report lines and errors only (release). The port
+// sets it from scda.toml's logging before Init: on, the full log; off, no log file at all (stderr still gets it
+// under nxlink)
+bool Verbose();
+void SetLogging(bool on);
 
 }  // namespace logx
 

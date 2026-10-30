@@ -70,6 +70,7 @@ void NameThread(const char* name) {
 }
 
 void Breadcrumb(const char*) {}
+void SetBootLog(bool) {}
 
 size_t ThreadStackSize() { return 64u << 20; }
 void ThreadStarted() {}

@@ -141,10 +141,14 @@ void RestoreClocks() {
 
 // started by nxlink -s: stderr goes to the PC, and the log with it (core/log.cpp)
 bool g_nxlink = false;
+bool g_boot_log = true;  // scda.toml's logging
+
+void SetBootLog(bool on) { g_boot_log = on; }
 
 // beside the logs; a relaunch adds its run to its predecessors' (menu to mission and back), a fresh start begins anew
 void Breadcrumb(const char* step) {
     if (g_nxlink) std::fprintf(stderr, "[boot] %s\n", step);
+    if (!g_boot_log) return;
     static bool first = true;
     // from hbloader's arguments, not Init's: a crash before main must not wipe the runs before it
     const char* args = static_cast<const char*>(envGetArgv());
@@ -473,7 +477,7 @@ size_t StackMirrorSize(const Thread* t) {
 
 [[noreturn]] void LeaveForNextLoad() {
     // unbuffered: each step is on the card before the next begins, so a step that hangs is the last one listed
-    FILE* f = std::fopen("sdmc:/switch/scda/logs/boot.txt", "a");
+    FILE* f = g_boot_log ? std::fopen("sdmc:/switch/scda/logs/boot.txt", "a") : nullptr;
     if (f) std::setvbuf(f, nullptr, _IONBF, 0);
     auto step = [&](const char* what) {
         if (f) std::fprintf(f, "%llu ms relaunch: %s\n", (unsigned long long)(armTicksToNs(armGetSystemTick()) / 1000000),

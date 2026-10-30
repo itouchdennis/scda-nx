@@ -299,7 +299,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     std::string log = app::Instance() > 1 ? "scda-" + std::to_string(app::Instance()) : "scda";
     logx::Init((app::ExeDir() / "logs").string(), log, relaunched);
     app::Load();
-    if (relaunched && !logx::kVerbose) {
+    if (relaunched && !logx::Verbose()) {
         wchar_t exe[MAX_PATH] = {};
         GetModuleFileNameW(nullptr, exe, MAX_PATH);
         LOGR("Relaunched: %ls", std::filesystem::path(exe).filename().c_str());

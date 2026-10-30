@@ -19,7 +19,7 @@
 #   SCDA_GPU       vk (default, Vulkan on mesa-switch's NVK), gl (OpenGL on switch-mesa) or null (draws nothing)
 #   SCDA_NVK_SDK   vk: the Mesa Horizon SDK's portlibs/switch (default build/nvk-sdk/opt/devkitpro/portlibs/switch,
 #                  where switch/nvk/build-nvk.sh installs it)
-#   VERBOSE        1 (default while the port is tested): the full log, written to the card twice a second
+#   (logging: off by default, "logging = true" in sdmc:/switch/scda/scda.toml writes the full log to logs/)
 #   JOBS           parallel compile jobs (default: by free memory, the generated files need ~1.5 GB each)
 set -euo pipefail
 
@@ -31,7 +31,6 @@ SD="${SD_ROOT:-$REPO/switch_sd}"
 GPU="${SCDA_GPU:-vk}"
 BUILD="${BUILD_DIR:-$REPO/build/switch$([ "$GPU" = vk ] && echo -vk)}"
 NVK="${SCDA_NVK_SDK:-$REPO/build/nvk-sdk/opt/devkitpro/portlibs/switch}"
-VERBOSE="${VERBOSE:-1}"
 
 fail() { echo "error: $*" >&2; exit 1; }
 [ -f "$DEVKITPRO/cmake/Switch.cmake" ] || fail "devkitPro not found at $DEVKITPRO"
@@ -48,7 +47,7 @@ fi
 cmake -S "$REPO" -B "$BUILD" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/cmake/Switch.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DSCDA_GEN_DIR="$GEN" -DSCDA_GPU="$GPU" ${SCDA_ICON:+-DSCDA_ICON="$SCDA_ICON"} -DSCDA_NVK_SDK="$NVK" -DSCDA_VERBOSE_LOG="$([ "$VERBOSE" = 1 ] && echo ON || echo OFF)" >/dev/null
+    -DSCDA_GEN_DIR="$GEN" -DSCDA_GPU="$GPU" ${SCDA_ICON:+-DSCDA_ICON="$SCDA_ICON"} -DSCDA_NVK_SDK="$NVK" -DSCDA_VERBOSE_LOG=OFF >/dev/null
 ninja -C "$BUILD" -j"$JOBS"
 
 DEST="$SD/switch/scda"

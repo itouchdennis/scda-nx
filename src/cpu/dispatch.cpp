@@ -170,7 +170,7 @@ std::atomic<uint32_t> g_kernel_traced{0};
 
 void x86_kernel(X86Context& ctx, uint8_t* base, uint32_t ordinal) {
     if (ordinal < 400 && g_exports[ordinal].fn) {
-        if (!logx::kVerbose || g_kernel_traced >= kKernelTraceCalls) {
+        if (!logx::Verbose() || g_kernel_traced >= kKernelTraceCalls) {
             g_exports[ordinal].fn(ctx, base);
             return;
         }

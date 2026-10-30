@@ -141,6 +141,9 @@ hbmenu with title takeover (hold R while starting a game); applet mode leaves to
 On the first start the shaders are built while you play: objects can be missing or see-through for a moment. They
 are kept on the SD card (`shaders.vkb`) and load at once from then on.
 
+Logging is off by default. To write the full log (and `boot.txt`) to `sdmc:/switch/scda/logs/`, for a bug report
+for example, add `logging = true` to `sdmc:/switch/scda/scda.toml`. A crash still writes `crash.txt` either way.
+
 What it took and the traps found on the way are in [PORTING_GUIDE.md](PORTING_GUIDE.md).
 
 ## Credits

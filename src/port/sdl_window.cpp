@@ -256,7 +256,7 @@ void HandleEvent(const SDL_Event& e) {
 
 // debug builds: every 15 s where each guest thread is, the return addresses on its stack (a hang shows its waits)
 void Watchdog() {
-    if (!logx::kVerbose) return;
+    if (!logx::Verbose()) return;
     static auto next = std::chrono::steady_clock::now() + std::chrono::seconds(15);
     if (std::chrono::steady_clock::now() < next) return;
     next += std::chrono::seconds(15);
@@ -442,13 +442,16 @@ void RequestQuit() {
 }  // namespace port
 
 int main(int argc, char** argv) {
+    bool logging = app::LoggingWanted();
+    logx::SetLogging(logging);
+    port::SetBootLog(logging);
     port::Init(argc, argv);
     std::string log = app::Instance() > 1 ? "scda-" + std::to_string(app::Instance()) : "scda";
     logx::Init((app::ExeDir() / "logs").string(), log, port::Relaunched());
     port::Breadcrumb(("log open: " + logx::Path()).c_str());
     app::Load();
     port::Breadcrumb("settings loaded");
-    if (port::Relaunched() && !logx::kVerbose) LOGR("Relaunched");
+    if (port::Relaunched() && !logx::Verbose()) LOGR("Relaunched");
     else app::LogSystem();
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");

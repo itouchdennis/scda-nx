@@ -32,6 +32,8 @@ bool LogToStderr();
 // a step of the start reached, written to boot.txt at once on the Switch (no-op elsewhere): what the log cannot
 // show when the process dies before its first write
 void Breadcrumb(const char* step);
+// scda.toml's logging off: no boot.txt either (before Init; crash.txt is still written on a crash)
+void SetBootLog(bool on);
 // the platform's setup before anything else runs (log device, exception handler) and its exit
 void Init(int argc, char** argv);
 [[noreturn]] void Exit(int code);
