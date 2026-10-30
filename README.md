@@ -1,4 +1,46 @@
-# Splinter Cell: Double Agent - XBE Recomp
+# scda-nx: Splinter Cell: Double Agent for the Nintendo Switch
+An experimental, unofficial Nintendo Switch (homebrew, libnx) port of [SCDA-XBERecomp](https://github.com/TGP482/SCDA-XBERecomp),
+the static recompilation of the original Xbox version of Splinter Cell: Double Agent. It renders through Vulkan on
+mesa-switch's NVK and runs on Linux as well, which serves as its test bed.
+
+> [!IMPORTANT]
+> **You must own a legally acquired copy of the game.** This repository contains no game data, no assets and no code
+> generated from the game: everything game specific is produced at build time from the files of your own copy. This
+> project does not support piracy in any form. Do not ask for game files, ISOs or prebuilt game code, and do not
+> share them in issues or pull requests; such requests will be closed.
+
+This project is not affiliated with or endorsed by Ubisoft, Microsoft or Nintendo. All trademarks belong to their
+respective owners.
+
+## Building for the Nintendo Switch
+Built on Linux with devkitPro, from the files of your own legally acquired copy of the game.
+
+1. Install devkitPro with `switch-dev` and `switch-sdl2`, and `switch-libexpat switch-zlib switch-libzstd`.
+2. Clone this repository: `git clone https://github.com/itouchdennis/scda-nx.git`
+3. Build NVK once: `MESA=/path/to/mesa-switch switch/nvk/build-nvk.sh` (see the script for what it needs).
+4. Put the extracted disc of your copy in `assets/` (`default.xbe`, `Default/`, `Media/`, ...) and generate the
+   game's C++ on the PC: `tools/regen.sh`.
+5. Build and stage the NRO: `switch/build.sh` (`build/switch-vk/scda.nro`, staged to `switch_sd/switch/scda/`).
+6. Copy `scda.nro` to `sdmc:/switch/scda/` and your extracted disc to `sdmc:/switch/scda/game/`, then start it from
+   hbmenu with title takeover (hold R while starting a game); applet mode leaves too little memory.
+
+On the first start the shaders are built while you play: objects can be missing or see-through for a moment. They
+are kept on the SD card (`shaders.vkb`) and load at once from then on.
+
+What it took and the traps found on the way are in [PORTING_GUIDE.md](PORTING_GUIDE.md).
+
+## Credits
+The recompilation, the Xbox kernel and XDK reimplementation, the renderer and all of the PC features are the work of
+the original [SCDA-XBERecomp](https://github.com/TGP482/SCDA-XBERecomp) project by TGP482 and Joshhhuaaa, made with
+the [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp) tool, under the MIT license (see [LICENSE](LICENSE)).
+This fork adds the Linux and Nintendo Switch port. Please report Switch issues here, not upstream.
+
+<details>
+<summary><b>The original project's README (Windows build, features, online play)</b></summary>
+
+> The following is the README of [SCDA-XBERecomp](https://github.com/TGP482/SCDA-XBERecomp) as it stood when this
+> fork was made. Releases, downloads and Windows support are there, not here.
+
 An unofficial native PC port of the original Xbox version of Splinter Cell: Double Agent via static recompilation, built into a 64 bit Windows executable. The game's x86 code is translated to C++ ahead of time, the Xbox kernel, Direct3D and DirectSound calls are implemented on Windows, and everything is drawn with Direct3D 12 and played through XAudio2. Made with the [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp) tool, created for this game originally.
 
 > [!NOTE]
@@ -212,16 +254,4 @@ Install [Visual Studio 2022](https://visualstudio.microsoft.com/downloads/) and 
 - Run `build.bat`. The first build recompiles the entire game and can take 30 to 90 minutes on weaker systems.
 - When it finishes, run `out\build\release\SCDA.exe`.
 
-## Nintendo Switch Port
-An experimental build for the Nintendo Switch (homebrew, libnx), rendering through Vulkan on mesa-switch's NVK. It is
-built on Linux with devkitPro and, as everywhere, needs your own extracted copy of the game: no game data and no code
-generated from it is part of this repository.
-
-1. Install devkitPro with `switch-dev` and `switch-sdl2`, and `switch-libexpat switch-zlib switch-libzstd`.
-2. Build NVK once: `MESA=/path/to/mesa-switch switch/nvk/build-nvk.sh` (see the script for what it needs).
-3. Put your extracted disc in `assets/` and generate the game's C++ on the PC: `tools/regen.sh`.
-4. Build and stage the NRO: `switch/build.sh` (`build/switch-vk/scda.nro`, staged to `switch_sd/switch/scda/`).
-5. Copy `scda.nro` to `sdmc:/switch/scda/` and the extracted disc to `sdmc:/switch/scda/game/`, then start it from
-   hbmenu with title takeover (hold R while starting a game); applet mode leaves too little memory.
-
-What it took and the traps found on the way are in [PORTING_GUIDE.md](PORTING_GUIDE.md).
+</details>
