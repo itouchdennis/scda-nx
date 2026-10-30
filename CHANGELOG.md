@@ -2,6 +2,12 @@
 There are no prebuilt NROs in any release: each release holds the source and the build scripts. You build the NRO
 yourself, from your own copy of the game ([docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md)).
 
+## v0.4.7
+- **Aiming on the Switch turns as fast on a diagonal as straight along an axis.** The game cuts a dead zone off each
+  stick axis, made for the Xbox's sticks; on the Switch's round sticks that made the camera fast only straight left,
+  right, up and down and slow in between. The right stick now has a round dead zone (0.15, or the *Deadzone*
+  setting) and turns as far as it is pushed in every direction. The left stick and Windows are as they were.
+
 ## v0.4.6
 - **Sharper picture on the Switch:** *Render Resolution* (Recomp Settings > Display) now works in the Vulkan
   renderer. The game is drawn at that share of the output's height: at 100% (the default) 960x720 at 720p and
