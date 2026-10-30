@@ -888,6 +888,36 @@ SHORT MoveDeadZone(SHORT value, float zone) {
     return SHORT(std::lround(value < 0 ? -out : out));
 }
 
+#ifdef SCDA_SWITCH
+// The game's bindings take a dead zone on each axis, made for the Xbox's sticks, which reach both axes' ends on a
+// diagonal. The Switch's round sticks give 0.71 on each there and 0.38 on the short axis at 22.5 degrees, which that
+// dead zone cuts to 0.58 and 0.11: the camera turned fast only straight along an axis. The right stick goes round
+// instead: a dead zone on its distance from the centre, the circle stretched to the square, and each axis lifted past
+// the game's dead zone, so the turn follows the push in every direction.
+constexpr float kRoundDeadZone = 0.15f;
+
+void RoundStick(SHORT& x, SHORT& y, float zone) {
+    float fx = float(x) / kStickMax, fy = float(y) / kStickMax;
+    float r = std::sqrt(fx * fx + fy * fy);
+    if (r <= zone) {
+        x = y = 0;
+        return;
+    }
+    float push = std::min((r - zone) / (1.0f - zone), 1.0f);
+    float dx = fx / r, dy = fy / r;
+    float square = push / std::max(std::fabs(dx), std::fabs(dy));
+    float game = GameDeadZone();
+    auto axis = [&](float d) {
+        float v = std::min(std::fabs(d) * square, 1.0f);
+        if (v <= 0.0f) return SHORT(0);
+        float out = (game + v * (1.0f - game)) * kStickMax;
+        return SHORT(std::lround(d < 0 ? -out : out));
+    };
+    x = axis(dx);
+    y = axis(dy);
+}
+#endif
+
 void ApplyDeadZone(XINPUT_GAMEPAD& g, float zone) {
     if (zone <= 0.0f || zone == GameDeadZone()) return;
     g.sThumbLX = MoveDeadZone(g.sThumbLX, zone);
@@ -959,7 +989,15 @@ bool ReadPad(int slot, XINPUT_GAMEPAD& g) {
     const app::Settings& s = app::Get();
     g.sThumbRX = s.invert_pad_x ? SHORT(-1 - rx) : rx;
     g.sThumbRY = s.invert_pad_y ? SHORT(-1 - ry) : ry;
+#ifdef SCDA_SWITCH
+    SHORT round_x = g.sThumbRX, round_y = g.sThumbRY;
     ApplyDeadZone(g, s.pad_dead_zone);
+    RoundStick(round_x, round_y, s.pad_dead_zone > 0.0f ? s.pad_dead_zone : kRoundDeadZone);
+    g.sThumbRX = round_x;
+    g.sThumbRY = round_y;
+#else
+    ApplyDeadZone(g, s.pad_dead_zone);
+#endif
     return true;
 }
 
