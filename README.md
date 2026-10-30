@@ -3,6 +3,12 @@ An experimental, unofficial Nintendo Switch (homebrew, libnx) port of [SCDA-XBER
 the static recompilation of the original Xbox version of Splinter Cell: Double Agent. It renders through Vulkan on
 mesa-switch's NVK and runs on Linux as well, which serves as its test bed.
 
+> [!NOTE]
+> **AI-written, human-tested.** All of the code this fork adds (the Linux and Switch port, the Vulkan renderer, the
+> build scripts and [PORTING_GUIDE.md](PORTING_GUIDE.md)) was written entirely by Claude, Anthropic's AI model. A
+> human tested it on a real Nintendo Switch and directed the work. The original recompilation it builds on is the work
+> of the [SCDA-XBERecomp](https://github.com/TGP482/SCDA-XBERecomp) authors (see [Credits](#credits)).
+
 > [!IMPORTANT]
 > **You must own a legally acquired copy of the game.** This repository contains no game data, no assets and no code
 > generated from the game: everything game specific is produced at build time from the files of your own copy. This
@@ -12,17 +18,76 @@ mesa-switch's NVK and runs on Linux as well, which serves as its test bed.
 This project is not affiliated with or endorsed by Ubisoft, Microsoft or Nintendo. All trademarks belong to their
 respective owners.
 
-## Building for the Nintendo Switch
-Built on Linux with devkitPro, from the files of your own legally acquired copy of the game.
+## No prebuilt NROs
+There are no prebuilt `.nro` files, and there will not be any. A built NRO holds the game's own code, recompiled
+from the XBE, so sharing one would mean sharing the game. Everyone builds their own from their own copy, as below.
+Please do not upload or ask for built NROs.
 
-1. Install devkitPro with `switch-dev` and `switch-sdl2`, and `switch-libexpat switch-zlib switch-libzstd`.
-2. Clone this repository: `git clone https://github.com/itouchdennis/scda-nx.git`
-3. Build NVK once: `MESA=/path/to/mesa-switch switch/nvk/build-nvk.sh` (see the script for what it needs).
-4. Put the extracted disc of your copy in `assets/` (`default.xbe`, `Default/`, `Media/`, ...) and generate the
-   game's C++ on the PC: `tools/regen.sh`.
-5. Build and stage the NRO: `switch/build.sh` (`build/switch-vk/scda.nro`, staged to `switch_sd/switch/scda/`).
-6. Copy `scda.nro` to `sdmc:/switch/scda/` and your extracted disc to `sdmc:/switch/scda/game/`, then start it from
-   hbmenu with title takeover (hold R while starting a game); applet mode leaves too little memory.
+## Building for the Nintendo Switch (Arch Linux)
+The NRO is built on Linux with devkitPro. These steps are for Arch Linux and its derivatives; each block can be pasted
+into a terminal as it is. Expect the first build to take a while: NVK, the recompiler and the whole game are compiled.
+
+### 1. Host packages
+Compilers and build tools, plus what Mesa's NVK needs to build (LLVM, libclc and the SPIR-V tools for its shader
+compiler, Rust with the AArch64 target, bindgen and cbindgen):
+```sh
+sudo pacman -S --needed base-devel git cmake ninja meson python python-mako python-yaml python-packaging python-ply \
+    flex bison clang llvm libclc spirv-llvm-translator spirv-tools glslang \
+    rust rust-aarch64-gnu rust-bindgen cbindgen sdl2-compat rsync
+```
+
+### 2. devkitPro
+devkitPro's pacman repositories, as [devkitPro describes them](https://devkitpro.org/wiki/devkitPro_pacman):
+```sh
+sudo pacman-key --recv BC26F752D25B92CE272E0F44F7FD5492264BB9D0 --keyserver keyserver.ubuntu.com
+sudo pacman-key --lsign BC26F752D25B92CE272E0F44F7FD5492264BB9D0
+curl -LO https://pkg.devkitpro.org/devkitpro-keyring.pkg.tar.zst
+sudo pacman -U devkitpro-keyring.pkg.tar.zst
+grep -q '^\[dkp-libs\]' /etc/pacman.conf || printf '\n[dkp-libs]\nServer = https://pkg.devkitpro.org/packages\n\n[dkp-linux]\nServer = https://pkg.devkitpro.org/packages/linux/$arch/\n' | sudo tee -a /etc/pacman.conf >/dev/null
+sudo pacman -Syu
+```
+Then the Switch toolchain and the libraries the port and NVK link:
+```sh
+sudo pacman -S --needed switch-dev switch-sdl2 switch-libexpat switch-zlib switch-libzstd
+source /etc/profile.d/devkit-env.sh
+```
+
+### 3. Sources
+This repository and mesa-switch (NVK for the Switch), side by side. The port was tested with mesa-switch at commit
+`1a8c1a66d6f`:
+```sh
+mkdir -p ~/switch && cd ~/switch
+git clone https://github.com/itouchdennis/scda-nx.git
+git clone https://github.com/danfromtico/mesa-switch.git
+git -C mesa-switch checkout 1a8c1a66d6f
+```
+
+### 4. NVK
+Builds mesa-switch's Vulkan driver once, into `scda-nx/build/nvk-sdk`, where the NRO build finds it:
+```sh
+cd ~/switch/scda-nx
+MESA=~/switch/mesa-switch switch/nvk/build-nvk.sh
+```
+
+### 5. Your game files
+Copy the **extracted** disc of your own copy of the game into `assets/`, so that `assets/default.xbe` sits beside
+`Default/` and `Media/` (an ISO is not enough here, extract it first). This should list the file:
+```sh
+ls ~/switch/scda-nx/assets/default.xbe
+```
+
+### 6. The NRO
+Recompiles the game from `assets/default.xbe` on the first run (`tools/regen.sh`), then builds and stages the NRO:
+```sh
+cd ~/switch/scda-nx
+switch/build.sh
+```
+The result is `switch_sd/switch/scda/scda.nro`. To give it an icon in hbmenu, put a 256x256 JPEG at
+`switch/icon.jpg` before building; git ignores it, so it stays out of the repository.
+
+### 7. On the Switch
+Copy `scda.nro` to `sdmc:/switch/scda/` and the extracted disc to `sdmc:/switch/scda/game/`, then start it from
+hbmenu with title takeover (hold R while starting a game); applet mode leaves too little memory.
 
 On the first start the shaders are built while you play: objects can be missing or see-through for a moment. They
 are kept on the SD card (`shaders.vkb`) and load at once from then on.
