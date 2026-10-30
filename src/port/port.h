@@ -45,8 +45,9 @@ void RequestQuit();
 [[noreturn]] void Relaunch(const char* exe, const std::string& extra);
 bool Relaunched();
 #ifdef __SWITCH__
-// the CPU at this many MHz, as the CPU clock setting asks
-void ApplyCpuClock(uint32_t mhz);
+// each frame: the CPU at this many MHz (the CPU clock setting), the GPU and the memory at the most a game gets, set
+// again when either changes or the console is docked or taken out
+void KeepClocks(uint32_t cpu_mhz);
 // the main thread's event loop: leaves once Relaunch (for the next NRO) or Exit (for the HOME menu) has been called
 void ServiceRelaunch();
 #endif
