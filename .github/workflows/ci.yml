@@ -1,5 +1,6 @@
-# Checks every push and pull request without the game: no game data and no code made from the game ever passes through
-# here, so nothing is linked and no NRO is made. What it checks:
+# Checks main and the pull requests into it, without the game; dev and other branches run nothing (Run workflow does,
+# by hand). No game data and no code made from the game ever passes through here, so nothing is linked and no NRO is
+# made. What it checks:
 #   commits   every commit's first line in Conventional Commits form (CONTRIBUTING.md)
 #   scripts   the shell scripts' syntax and shellcheck's warnings, the Windows script's PowerShell and line endings
 #   linux     the Linux port compiles with each renderer (vk, gl, null), and the recompiler builds
@@ -12,7 +13,9 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
