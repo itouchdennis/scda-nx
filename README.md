@@ -66,8 +66,9 @@ Start the Homebrew Menu with title takeover (hold **R** while you start any game
 Agent from it. The first time, things can be missing for a moment while the shaders are built.
 
 For an icon in the Homebrew Menu, put a 256x256 JPEG named `icon.jpg` beside the script before building. To run
-again for updates, just run the script again. The build cache stays in the Docker volume `scda-nx-cache`
-(`docker volume rm scda-nx-cache` removes it). macOS may work with Docker Desktop too, but it has not been tested.
+again for updates, just run the script again; the NRO it replaces is kept in `out/BAK/`, named after its version.
+The build cache stays in the Docker volume `scda-nx-cache` (`docker volume rm scda-nx-cache` removes it). macOS may
+work with Docker Desktop too, but it has not been tested.
 
 > [!CAUTION]
 > The same goes here as for every script: read [build-nro-windows.bat](build-nro-windows.bat) or

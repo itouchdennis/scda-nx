@@ -13,7 +13,8 @@
 #   SCDA_GEN_DIR   generated code from tools/regen.sh (default generated/game; made here when missing)
 #   STAGE_GAME     1: also copy the extracted disc (SCDA_GAME_SRC, default assets/) into the staging folder; by
 #                  default only the NRO is staged and the disc is copied to the card once by hand
-#   SD_ROOT        staging SD root (default switch_sd/)
+#   SD_ROOT        staging SD root (default switch_sd/); a scda.nro already there that differs from the new one is
+#                  moved to <SD_ROOT>/BAK/scda_v<its version>.nro first, beside switch/ so it stays off the card
 #   BUILD_DIR      default build/switch-vk, build/switch for SCDA_GPU=gl
 #   SCDA_ICON      the NRO's hbmenu icon, a 256x256 JPEG (default switch/icon.jpg when it exists)
 #   SCDA_GPU       vk (default, Vulkan on mesa-switch's NVK), gl (OpenGL on switch-mesa) or null (draws nothing)
@@ -50,8 +51,31 @@ cmake -S "$REPO" -B "$BUILD" -G Ninja \
     -DSCDA_GEN_DIR="$GEN" -DSCDA_GPU="$GPU" ${SCDA_ICON:+-DSCDA_ICON="$SCDA_ICON"} -DSCDA_NVK_SDK="$NVK" -DSCDA_VERBOSE_LOG=OFF >/dev/null
 ninja -C "$BUILD" -j"$JOBS"
 
+# the version an NRO carries: its NACP's display version (the NRO's assets after its size, the NACP at their offset)
+nro_version() {
+    python3 - "$1" <<'PY'
+import struct, sys
+d = open(sys.argv[1], "rb").read()
+size = struct.unpack_from("<I", d, 0x18)[0]
+if d[size:size + 4] != b"ASET":
+    sys.exit()
+offset = struct.unpack_from("<Q", d, size + 0x18)[0]
+print(d[size + offset + 0x3060:size + offset + 0x3070].split(b"\0")[0].decode("ascii", "replace"))
+PY
+}
+
 DEST="$SD/switch/scda"
 mkdir -p "$DEST/game"
+if [ -f "$DEST/scda.nro" ] && ! cmp -s "$BUILD/scda.nro" "$DEST/scda.nro"; then
+    old="$(nro_version "$DEST/scda.nro" || true)"
+    # 0.1.0: what every NRO before versioning carried
+    case "$old" in ""|0.1.0) old="unversioned_$(date -r "$DEST/scda.nro" +%Y%m%d-%H%M)" ;; *) old="v$old" ;; esac
+    bak="$SD/BAK/scda_$old.nro"
+    [ -e "$bak" ] && bak="$SD/BAK/scda_${old}_$(date -r "$DEST/scda.nro" +%Y%m%d-%H%M%S).nro"
+    mkdir -p "$SD/BAK"
+    mv "$DEST/scda.nro" "$bak"
+    echo "previous scda.nro kept as $bak"
+fi
 cp "$BUILD/scda.nro" "$DEST/scda.nro"
 if [ "${STAGE_GAME:-0}" = 1 ] && [ -f "$GAME/default.xbe" ]; then
     # several GB: copy only what changed

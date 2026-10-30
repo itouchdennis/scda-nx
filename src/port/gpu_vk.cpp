@@ -273,7 +273,12 @@ public:
     void Flush() override {
         if (recorded_) Submit();
     }
-    void SetGamma(const uint8_t*) override {}
+    // the title's ramp (its shadow calibration), applied with the settings' curve from the next Present on
+    void SetGamma(const uint8_t* ramp) override {
+        std::memcpy(game_ramp_.data(), ramp, game_ramp_.size());
+        has_game_ramp_ = true;
+        ramp_set_ = ~0u;
+    }
 
 private:
     struct Alloc {
@@ -438,6 +443,8 @@ private:
     vk::Image lut_;
     bool gamma_ = false;
     uint32_t ramp_set_ = ~0u;
+    std::array<uint8_t, 768> game_ramp_{};
+    bool has_game_ramp_ = false;
     std::vector<VkSemaphore> acquire_;   // round robin, each with the serial that waited on it
     std::vector<uint64_t> acquire_serial_;
     std::vector<VkSemaphore> rendered_;  // by swap chain image
@@ -1108,7 +1115,7 @@ void VkBackend::CreateBlit() {
 void VkBackend::UploadGammaRamp(uint32_t brightness, uint32_t contrast) {
     ramp_set_ = brightness << 8 | contrast;
     uint8_t ramp[256 * 4];
-    gamma_ = GammaRamp(brightness, contrast, ramp);
+    gamma_ = GammaRamp(brightness, contrast, has_game_ramp_ ? game_ramp_.data() : nullptr, ramp);
     Alloc a = Upload(sizeof(ramp), 16);
     std::memcpy(a.cpu, ramp, sizeof(ramp));
     Outside();

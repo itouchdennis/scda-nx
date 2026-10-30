@@ -338,19 +338,26 @@ uint32_t MaxVertex(const Assembled& a) {
     return uint32_t(std::max<int64_t>(hi + a.base_vertex, 0));
 }
 
-bool GammaRamp(uint32_t brightness, uint32_t contrast, uint8_t ramp[256 * 4]) {
+bool GammaRamp(uint32_t brightness, uint32_t contrast, const uint8_t* game, uint8_t ramp[256 * 4]) {
     float k = std::exp2((float(contrast) - 50.0f) / 50.0f);
     float g = std::exp2((50.0f - float(brightness)) / 50.0f);
-    bool identity = true;
+    uint8_t curve[256];
     for (int i = 0; i < 256; i++) {
         float x = i / 255.0f;
         float y = x < 0.5f ? 0.5f * std::pow(2.0f * x, k) : 1.0f - 0.5f * std::pow(2.0f - 2.0f * x, k);
         float v = std::pow(y, g);
-        uint8_t o = uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
+        curve[i] = uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
+    }
+    // the title's ramp first, as the Xbox's gamma hardware applied it to every frame, then the settings' curve
+    bool identity = true;
+    for (int i = 0; i < 256; i++) {
         uint8_t* p = ramp + i * 4;
-        p[0] = p[1] = p[2] = o;
+        for (int c = 0; c < 3; c++) {
+            uint8_t in = game ? game[(2 - c) * 256 + i] : uint8_t(i);  // BGRA from the ramp's red, green, blue
+            p[c] = curve[in];
+            identity &= p[c] == i;
+        }
         p[3] = 255;
-        identity &= o == i;
     }
     return !identity;
 }

@@ -131,8 +131,10 @@ void CheckNormCube(bool& norm, const TextureDesc& d, const FormatInfo& fi, uint3
 // the highest vertex the draw reads, relative to the uploaded buffers
 uint32_t MaxVertex(const Assembled& a);
 
-// brightness and contrast from 0 to 100, 50/50 leaves the image unchanged: the ramp as BGRA, false for identity
-bool GammaRamp(uint32_t brightness, uint32_t contrast, uint8_t ramp[256 * 4]);
+// brightness and contrast from 0 to 100, 50/50 leaves the image unchanged, after game: the title's own ramp
+// (D3DDevice_SetGammaRamp, its shadow calibration: red, green and blue, 256 each) or null. The ramp as BGRA, false for
+// identity
+bool GammaRamp(uint32_t brightness, uint32_t contrast, const uint8_t* game, uint8_t ramp[256 * 4]);
 
 // colour blind modes 1 to 3 as d3d12.cpp: Machado 2009 simulation, then Fidaner's daltonize; rows of a 3x3 matrix
 std::array<float, 9> ColourBlindMatrix(uint32_t mode);

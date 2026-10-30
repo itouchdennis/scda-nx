@@ -355,7 +355,12 @@ public:
         Current();
         gl.Flush();
     }
-    void SetGamma(const uint8_t*) override {}
+    // the title's ramp (its shadow calibration), applied with the settings' curve from the next Present on
+    void SetGamma(const uint8_t* ramp) override {
+        std::memcpy(game_ramp_.data(), ramp, game_ramp_.size());
+        has_game_ramp_ = true;
+        ramp_set_ = ~0u;
+    }
 
 private:
     struct Alloc {
@@ -474,6 +479,8 @@ private:
     GLuint lut_ = 0;
     bool gamma_ = false;
     uint32_t ramp_set_ = ~0u;
+    std::array<uint8_t, 768> game_ramp_{};
+    bool has_game_ramp_ = false;
 
     // NOOVERWRITE locks: each surface read back into a ring of persistently mapped buffers, the newest the GPU has
     // finished handed to the title without waiting (gpu/d3d12.cpp does the same)
@@ -874,7 +881,7 @@ void GlBackend::CreateGammaLut() {
 void GlBackend::UploadGammaRamp(uint32_t brightness, uint32_t contrast) {
     ramp_set_ = brightness << 8 | contrast;
     uint8_t ramp[256 * 4];
-    gamma_ = GammaRamp(brightness, contrast, ramp);
+    gamma_ = GammaRamp(brightness, contrast, has_game_ramp_ ? game_ramp_.data() : nullptr, ramp);
     gl.BindTexture(GL_TEXTURE_2D, lut_);
     gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     gl.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 1, GL_BGRA, GL_UNSIGNED_BYTE, ramp);

@@ -2,6 +2,15 @@
 There are no prebuilt NROs in any release: each release holds the source and the build scripts. You build the NRO
 yourself, from your own copy of the game ([docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md)).
 
+## v0.4.1
+- **The shadow calibration in the game's settings works.** The slider sets the game's gamma ramp, which the port
+  dropped so far; it is now applied to every frame, as on the Xbox, before the port's own brightness and contrast
+  (tested on a Switch V1).
+- **Earlier NROs are kept:** a build moves the `scda.nro` it replaces to `BAK/scda_v<version>.nro` beside the
+  `switch` folder (so it does not end up on the SD card), instead of overwriting it.
+- **The NRO carries its release:** the Homebrew Menu shows the version (0.4.1) instead of 0.1.0, from the version in
+  `CMakeLists.txt`; the release workflow checks that a new tag matches it.
+
 ## v0.4.0
 - **Quitting the game no longer crashes the Switch.** Exit in the main menu now leaves the way a relaunch does (the
   game's threads paused, the GPU, audio and network services closed in order) and returns to the HOME menu instead

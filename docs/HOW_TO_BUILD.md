@@ -59,7 +59,8 @@ are saved on the SD card and load at once from then on.
 - **Read before you run.** Both scripts are plain text. If you are skeptical (that is a good thing), open them and read
   what they do first, or build by hand as the [README](https://github.com/itouchdennis/scda-nx#readme) describes.
 - **An icon in the Homebrew Menu:** put a 256x256 JPEG named `icon.jpg` beside the script before building.
-- **Updates:** run the script again. It fetches the newest builder and rebuilds only what changed.
+- **Updates:** run the script again. It fetches the newest builder and rebuilds only what changed. The NRO it
+  replaces is kept in `out/BAK/`, named after its version (`scda_v0.4.1.nro`).
 - **Disk space:** the builder and the build cache live in Docker. To remove them:
   `docker volume rm scda-nx-cache` and `docker image rm ghcr.io/itouchdennis/scda-nx-builder:latest`.
 - **Logs for a bug report:** add `logging = true` to `sdmc:/switch/scda/scda.toml`; the log is written to

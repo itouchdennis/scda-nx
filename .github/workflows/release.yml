@@ -24,6 +24,11 @@ jobs:
       - name: Notes and files
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
+          version="$(sed -nE 's/^ *project\(scda VERSION ([0-9.]+) .*/\1/p' CMakeLists.txt | head -1)"
+          # a new tag must match the release in CMakeLists.txt (a run by hand may redo an older release from here)
+          if [ "${{ github.event_name }}" = push ] && [ "$tag" != "v$version" ]; then
+              echo "the tag $tag is not CMakeLists.txt's version v$version"; exit 1
+          fi
           awk -v t="## $tag" '$0==t{on=1;next} /^## v/{on=0} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "CHANGELOG.md has no section '## $tag'"; exit 1; }
           { echo "## What's new"; cat notes.md; echo; echo "---"; echo; sed '1s/^# /## /' docs/HOW_TO_BUILD.md; } > body.md
