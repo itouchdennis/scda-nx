@@ -33,7 +33,11 @@ inline constexpr const char* kLanguages[] = {"int", "fra", "deu", "ita", "esp"};
 
 struct Settings {
     std::string monitor;             // its device name, \\.\DISPLAY2; empty the primary
+#ifdef SCDA_SWITCH
+    DisplayMode display_mode = DisplayMode::Fullscreen;  // always, the menu has no choice of it there
+#else
     DisplayMode display_mode = DisplayMode::Borderless;
+#endif
     uint32_t width = 0, height = 0;  // 0 is the desktop mode
     uint32_t render_percent = 100;   // of the output height
     uint32_t fps_cap = kFpsCapRefresh;  // 0 unlimited, kFpsCapRefresh the monitor's refresh rate

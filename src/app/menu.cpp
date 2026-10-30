@@ -346,6 +346,24 @@ bool VersusHides(int id) {
            id == kShadowDistance || id == kShadowFilter || id == kTickRate || id == kInputDelay || IsGyroRow(id);
 }
 
+// what only the D3D12 renderer draws (Windows): the port's Vulkan and OpenGL renderers have no MSAA, SM3 features, soft
+// shadow filter, ambient occlusion or HDR, so their rows go, and settings.cpp keeps them off. The Switch has one screen,
+// always full screen
+bool PortHides(int id) {
+#ifdef _WIN32
+    (void)id;
+    return false;
+#else
+    bool d3d12_only = id == kShaderModel || id == kHdr || id == kToneMapping || id == kAmbientOcclusion ||
+                      id == kMsaa || id == kShadowFilter || id == kHdrOutput;
+#ifdef SCDA_SWITCH
+    return d3d12_only || id == kDisplayMode || id == kMonitor;
+#else
+    return d3d12_only;
+#endif
+#endif
+}
+
 constexpr Row kSettingsRows[] = {
     {Kind::Heading, -1, "DISPLAY"},
     {Kind::Value, kMonitor, "MONITOR"},
@@ -1291,7 +1309,7 @@ std::vector<std::string> Choices(const Row& row, int* current) {
 
 bool Shown(const Row& row) {
     std::lock_guard lock(UiLock());
-    bool hidden = row.id == kMicrophone || row.id == kPushToTalk || VersusHides(row.id);
+    bool hidden = row.id == kMicrophone || row.id == kPushToTalk || VersusHides(row.id) || PortHides(row.id);
     return row.kind != Kind::Value || !hidden;
 }
 

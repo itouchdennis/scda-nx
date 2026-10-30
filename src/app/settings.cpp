@@ -184,6 +184,18 @@ void Load() {
     if (const toml::table* pads = t["controller"].as_table())
         for (auto&& [id, value] : *pads)
             if (auto v = value.value<std::string>()) s.pad_buttons[std::string(id.str())] = *v;
+#ifndef _WIN32
+    // only the D3D12 renderer draws these (menu.cpp's PortHides): off here, whatever a file from Windows says, so the
+    // game's hooks for ambient occlusion and the soft shadow filter do not run against a renderer without them
+    s.msaa = 0;
+    s.ambient_occlusion = 0;
+    s.shadow_filter = 1;
+    s.shader_model = 1;
+    s.hdr_rendering = s.tone_mapping = s.hdr_output = false;
+#ifdef SCDA_SWITCH
+    s.display_mode = DisplayMode::Fullscreen;
+#endif
+#endif
 }
 
 namespace {
