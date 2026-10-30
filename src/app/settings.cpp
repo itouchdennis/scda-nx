@@ -159,6 +159,7 @@ void Load() {
     s.aim_vertical_sensitivity = float(t["aim_vertical_sensitivity"].value_or(double(s.aim_vertical_sensitivity)));
     s.skip_intros = t["skip_intros"].value_or(s.skip_intros);
     s.swap_ab = t["swap_ab"].value_or(s.swap_ab);
+    s.swap_xy = t["swap_xy"].value_or(s.swap_xy);
     s.pause_on_focus_loss = t["pause_on_focus_loss"].value_or(s.pause_on_focus_loss);
     std::string language = t["language"].value_or(s.language);
     bool known = std::find(std::begin(kLanguages), std::end(kLanguages), language) != std::end(kLanguages);
@@ -258,6 +259,7 @@ toml::table Table() {
                   {"aim_vertical_sensitivity", double(s.aim_vertical_sensitivity)},
                   {"skip_intros", s.skip_intros},
                   {"swap_ab", s.swap_ab},
+                  {"swap_xy", s.swap_xy},
                   {"pause_on_focus_loss", s.pause_on_focus_loss},
                   {"language", s.language},
                   {"audio_output", int64_t(s.audio_output)},

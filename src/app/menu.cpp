@@ -329,7 +329,7 @@ enum RowId {
     kSniperSensitivity, kFmvScale, kColourBlind, kAimHorizontal, kAimVertical, kInvertMouseX, kInvertPadX, kInvertPadY,
     kSensitivityVertical, kPadDeadZone, kPadHorizontal, kPadVertical, kPadAimHorizontal, kPadAimVertical,
     kVibration, kGyroAiming, kGyroSensitivity, kGyroAxis, kGyroButton, kGyroButtonMode, kGyroRecenter, kGyroCalibrate,
-    kTextureReplacement, kTextureDumping, kDumpFormat, kSwapAB
+    kTextureReplacement, kTextureDumping, kDumpFormat, kSwapAB, kSwapXY
 };
 
 using rows::Kind;
@@ -348,17 +348,17 @@ bool VersusHides(int id) {
 
 // what only the D3D12 renderer draws (Windows): the port's Vulkan and OpenGL renderers have no MSAA, SM3 features, soft
 // shadow filter, ambient occlusion or HDR, so their rows go, and settings.cpp keeps them off. The Switch has one screen,
-// always full screen; the A/B swap is the Switch's alone
+// always full screen; the button layout rows are the Switch's alone
 bool PortHides(int id) {
 #ifdef _WIN32
-    return id == kSwapAB;
+    return id == kSwapAB || id == kSwapXY;
 #else
     bool d3d12_only = id == kShaderModel || id == kHdr || id == kToneMapping || id == kAmbientOcclusion ||
                       id == kMsaa || id == kShadowFilter || id == kHdrOutput;
 #ifdef SCDA_SWITCH
     return d3d12_only || id == kDisplayMode || id == kMonitor;
 #else
-    return d3d12_only || id == kSwapAB;
+    return d3d12_only || id == kSwapAB || id == kSwapXY;
 #endif
 #endif
 }
@@ -391,7 +391,8 @@ constexpr Row kSettingsRows[] = {
     {Kind::Value, kShadowFilter, "SHADOW FILTER"},
     {Kind::Heading, -1, "GENERAL"},
     {Kind::Value, kSkipIntros, "SKIP INTROS"},
-    {Kind::Value, kSwapAB, "SWITCH A/B SWAP"},
+    {Kind::Value, kSwapAB, "USE SWITCH BUTTON LAYOUT FOR A/B"},
+    {Kind::Value, kSwapXY, "USE SWITCH BUTTON LAYOUT FOR X/Y"},
     {Kind::Value, kPauseOnFocusLoss, "PAUSE ON FOCUS LOSS"},
     {Kind::Value, kLanguage, "LANGUAGE"},
     {Kind::Value, kAudioOutput, "AUDIO OUTPUT"},
@@ -482,6 +483,7 @@ bool* ToggleFlag(Settings& s, int id) {
         case kSmaa: return &s.smaa;
         case kSkipIntros: return &s.skip_intros;
         case kSwapAB: return &s.swap_ab;
+        case kSwapXY: return &s.swap_xy;
         case kPauseOnFocusLoss: return &s.pause_on_focus_loss;
         case kPushToTalk: return &s.push_to_talk;
         case kInvertMouse: return &s.invert_mouse;
@@ -894,6 +896,9 @@ constexpr bool kLevelSelect = true;
 // the controller page where the game has pad actions, the level select in debug builds where the game
 // has levels to open
 bool PageShown(int page) {
+#ifdef SCDA_SWITCH
+    if (page == kKeyboardPage) return false;  // no mouse or keyboard there
+#endif
     size_t pads = 0;
     input::PadActions(&pads);
     if (page == kControllerPage) return pads > 0;

@@ -99,7 +99,13 @@ constexpr uint32_t kLeft = 0x25;
 constexpr uint32_t kRight = 0x27;
 constexpr uint32_t kEscape = 0x1B;
 const char* const kCaptions[] = {"Recomp Settings", "Mouse and Keyboard", "Controller"};
-constexpr int kCaptionCount = int(std::size(kCaptions));
+// the captions listed, by mode: the Switch has no mouse or keyboard
+#ifdef SCDA_SWITCH
+constexpr int kListedModes[] = {0, 2};
+#else
+constexpr int kListedModes[] = {0, 1, 2};
+#endif
+constexpr int kCaptionCount = int(std::size(kListedModes));
 // per caption
 const std::vector<std::string_view> kSections[] = {
     {"DISPLAY", "GRAPHICS", "GENERAL"},
@@ -775,7 +781,7 @@ X86_FUNC(sub_001A53B5) {
     if (count < 2) return;  // split screen shows Controls only
     g_first = count;
     ctx.ecx = list;
-    for (const char* caption : kCaptions) CallGuest(ctx, kAddItem, {Wide16(Text(caption)), 0});
+    for (int mode : kListedModes) CallGuest(ctx, kAddItem, {Wide16(Text(kCaptions[mode])), 0});
     G<uint8_t>(list + kRowsShown) = uint8_t(count + kCaptionCount);
     CallGuest(ctx, kLayout, {});
     if (g_restore) RestoreStock(ctx, menu);
@@ -815,7 +821,7 @@ X86_FUNC(sub_001A4161) {
     }
     if (ours_list && g_take.mode < 0 && g_first >= 0 && R32(instance + kInstanceWidget) == list && row >= g_first &&
         row < g_first + kCaptionCount && IsPage(ctx, owner, kOptionsName)) {
-        OpenSections(ctx, menu, list, owner, row - g_first);
+        OpenSections(ctx, menu, list, owner, kListedModes[row - g_first]);
         ctx.ecx = menu + kListener;
         G<uint8_t>(owner + kTaken) = 1;
         ctx.eax = 0;

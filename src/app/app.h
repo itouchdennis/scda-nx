@@ -87,10 +87,14 @@ struct Settings {
     float aim_horizontal_sensitivity = 1.0f;
     float aim_vertical_sensitivity = 1.0f;
     bool skip_intros = false;        // logos video and rating screen at boot
+    // the Switch's face buttons by their labels, not the Xbox's positions: A confirms and B goes back, X and Y as
+    // printed; each on its own, both on there by default
 #ifdef SCDA_SWITCH
-    bool swap_ab = true;             // the Switch's A confirms and B goes back, Nintendo style, in the game and its menus
+    bool swap_ab = true;
+    bool swap_xy = true;
 #else
-    bool swap_ab = false;            // the Switch only: A and B by label, not by position as the Xbox's
+    bool swap_ab = false;
+    bool swap_xy = false;
 #endif
     bool pause_on_focus_loss = true;  // the game and its sound stop while the window is in the background
     std::string language = "auto";   // "auto" (the Windows display language) or one of kLanguages

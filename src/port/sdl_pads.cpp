@@ -36,10 +36,10 @@ BYTE Trigger(SDL_GameController* pad, SDL_GameControllerAxis axis) {
 }
 
 XINPUT_GAMEPAD Read(SDL_GameController* pad) {
-    // Xbox labels: on a Nintendo layout SDL still names the bottom face button A by position (SOUTH). swap_ab (the
-    // Switch's default) makes them follow the labels instead: the right one, Nintendo's A, is the Xbox's A, so it
-    // confirms in the game and in every menu, and the bottom one, Nintendo's B, goes back
-    const bool swap = app::Get().swap_ab;
+    // Xbox labels: on a Nintendo layout SDL still names the bottom face button A by position (SOUTH). swap_ab and
+    // swap_xy (the Switch's defaults) make them follow the labels instead: the right one, Nintendo's A, is the Xbox's
+    // A, so it confirms in the game and in every menu, the bottom one, Nintendo's B, goes back, and X and Y likewise
+    const bool ab = app::Get().swap_ab, xy = app::Get().swap_xy;
     constexpr std::pair<SDL_GameControllerButton, WORD> kButtons[] = {
         {SDL_CONTROLLER_BUTTON_DPAD_UP, XINPUT_GAMEPAD_DPAD_UP},
         {SDL_CONTROLLER_BUTTON_DPAD_DOWN, XINPUT_GAMEPAD_DPAD_DOWN},
@@ -58,8 +58,10 @@ XINPUT_GAMEPAD Read(SDL_GameController* pad) {
     };
     XINPUT_GAMEPAD g{};
     for (auto [button, mask] : kButtons) {
-        if (swap && mask == XINPUT_GAMEPAD_A) mask = XINPUT_GAMEPAD_B;
-        else if (swap && mask == XINPUT_GAMEPAD_B) mask = XINPUT_GAMEPAD_A;
+        if (ab && mask == XINPUT_GAMEPAD_A) mask = XINPUT_GAMEPAD_B;
+        else if (ab && mask == XINPUT_GAMEPAD_B) mask = XINPUT_GAMEPAD_A;
+        else if (xy && mask == XINPUT_GAMEPAD_X) mask = XINPUT_GAMEPAD_Y;
+        else if (xy && mask == XINPUT_GAMEPAD_Y) mask = XINPUT_GAMEPAD_X;
         if (SDL_GameControllerGetButton(pad, button)) g.wButtons |= mask;
     }
     g.bLeftTrigger = Trigger(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
