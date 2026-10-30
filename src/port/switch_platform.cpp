@@ -37,6 +37,8 @@ int g_heap_left_ranges = 0;
 // pages of it inaccessible, a stack mirror's source or transfer memory it did not close, and the first allocation
 // over one faults (tmemCreate's memset, before main). The heap is the largest stretch of it that is plain read/write.
 extern "C" char __tls_start[], __tls_end[];
+// libnx's (applet.c): 1 ends the application through the applet service when the process exits
+extern "C" u32 __nx_applet_exit_mode;
 
 extern "C" void __libnx_initheap(void) {
     extern char* fake_heap_start;
@@ -319,7 +321,7 @@ uint64_t ThreadCpuNs() {
 extern "C" Result __real_threadClose(Thread* t);
 
 namespace {
-// the threads libnx started and has not closed, for LeaveForNextLoad (threadCreate wrapped at link time); a detached
+// the threads libnx started and has not closed, for Leave (threadCreate wrapped at link time); a detached
 // thread is never closed, so its Thread stays valid after it ends
 std::mutex g_threads_lock;
 std::vector<Thread*> g_threads;
@@ -357,8 +359,10 @@ int ReapEnded() {
     return n;
 }
 
-// Relaunch's arguments are set: the main thread leaves for them
+// Relaunch's arguments are set, or Exit was called: the main thread leaves
 std::atomic<bool> g_leave{false};
+// Exit's: to the HOME menu, not into the next NRO
+std::atomic<bool> g_home{false};
 
 // the condition variable each thread waits on (condvarWaitTimeout wrapped at link time). The kernel keeps a wait by the
 // condvar's address, and a paused thread keeps waiting into the next run: that run's objects sit at the same addresses
@@ -475,13 +479,19 @@ size_t StackMirrorSize(const Thread* t) {
     return (tls + t->stack_sz + 0x126F) & ~size_t(0xFFF);
 }
 
-[[noreturn]] void LeaveForNextLoad() {
+// The way out of the process, for a relaunch and for the game's exit alike: every other thread paused and the services
+// closed under none of them. Closing them while the game's, the audio's and the GPU's threads still ran (std::exit)
+// crashed on the way out
+[[noreturn]] void Leave() {
+    const bool home = g_home.load();
+    const char* why = home ? "exit" : "relaunch";
     // unbuffered: each step is on the card before the next begins, so a step that hangs is the last one listed
     FILE* f = g_boot_log ? std::fopen("sdmc:/switch/scda/logs/boot.txt", "a") : nullptr;
     if (f) std::setvbuf(f, nullptr, _IONBF, 0);
     auto step = [&](const char* what) {
-        if (f) std::fprintf(f, "%llu ms relaunch: %s\n", (unsigned long long)(armTicksToNs(armGetSystemTick()) / 1000000),
-                            what);
+        if (f)
+            std::fprintf(f, "%llu ms %s: %s\n", (unsigned long long)(armTicksToNs(armGetSystemTick()) / 1000000), why,
+                         what);
     };
     Handle self = threadGetCurHandle();
     std::vector<Thread*> threads;
@@ -493,15 +503,16 @@ size_t StackMirrorSize(const Thread* t) {
     }
     s64 used, limit;
     ThreadsInUse(&used, &limit);
-    LOGI("relaunch: %d ended threads closed, pausing %zu threads; the process holds %lld of %lld threads", reaped,
+    LOGI("%s: %d ended threads closed, pausing %zu threads; the process holds %lld of %lld threads", why, reaped,
          threads.size(), (long long)used, (long long)limit);
     logx::Flush();
     // a thread paused inside malloc would hold its lock for good, and freeing below needs it; held here, no paused
     // thread has it. Nothing else that may take a lock runs from here on
     __malloc_lock(_REENT);
     step("malloc locked");
-    if (f) std::fprintf(f, "relaunch: %d ended threads closed, %lld of %lld threads held\n", reaped, (long long)used,
-                        (long long)limit);
+    if (f)
+        std::fprintf(f, "%s: %d ended threads closed, %lld of %lld threads held\n", why, reaped, (long long)used,
+                     (long long)limit);
     for (Thread* t : threads) {
         if (t->handle != self) svcSetThreadActivity(t->handle, ThreadActivity_Paused);
     }
@@ -515,7 +526,7 @@ size_t StackMirrorSize(const Thread* t) {
             woken++;
         }
     }
-    if (f) std::fprintf(f, "relaunch: %d condvar waits woken\n", woken);
+    if (f) std::fprintf(f, "%s: %d condvar waits woken\n", why, woken);
     int stacks = 0;
     for (Thread* t : threads) {
         if (t->handle != self && R_SUCCEEDED(svcUnmapMemory(t->stack_mirror, t->stack_mem, StackMirrorSize(t)))) stacks++;
@@ -556,30 +567,41 @@ size_t StackMirrorSize(const Thread* t) {
     }
     u64 recached = HeapRecache();
     if (f)
-        std::fprintf(f, "%llu ms relaunch: %llu MB still mapped for the GPU, %llu MB still lent out, %llu MB cached again\n",
-                     (unsigned long long)(armTicksToNs(armGetSystemTick()) / 1000000), (unsigned long long)(mapped >> 20),
+        std::fprintf(f, "%llu ms %s: %llu MB still mapped for the GPU, %llu MB still lent out, %llu MB cached again\n",
+                     (unsigned long long)(armTicksToNs(armGetSystemTick()) / 1000000), why, (unsigned long long)(mapped >> 20),
                      (unsigned long long)(lent >> 20), (unsigned long long)(recached >> 20));
     if (f) {
-        std::fprintf(f, "relaunch: %d of %zu stacks back, %s thread\n", stacks, threads.size(),
+        std::fprintf(f, "%s: %d of %zu stacks back, %s thread\n", why, stacks, threads.size(),
                      self == envGetMainThreadHandle() ? "main" : "a guest");
         ReportHeap(f);
     }
     RestoreClocks();
-    step("leaving for the next NRO");
+    // to the HOME menu: libnx ends the application through the applet service on the way out, as hbmenu's own exit
+    // does; otherwise hbloader takes over and starts the next NRO, or the homebrew menu
+    if (home) __nx_applet_exit_mode = 1;
+    step(home ? "leaving for the HOME menu" : "leaving for the next NRO");
     if (f) std::fclose(f);
     std::_Exit(0);
 }
 }  // namespace
 
 void ServiceRelaunch() {
-    if (g_leave.load()) LeaveForNextLoad();
+    if (g_leave.load()) Leave();
 }
 
+// the game is done (its Exit, HalReturnToFirmware) or cannot go on: back to the HOME menu, the way a relaunch leaves.
+// The main thread does it when it can (its event loop looks every 2 ms), as for Relaunch
 void Exit(int code) {
+    LOGI("exit (%d): leaving for the HOME menu", code);
+    Breadcrumb("exit");
     logx::Flush();
-    if (g_sockets) socketExit();
-    RestoreClocks();
-    std::exit(code);
+    g_home = true;
+    g_leave = true;
+    if (threadGetCurHandle() != envGetMainThreadHandle()) {
+        for (int i = 0; i < 300; i++) svcSleepThread(10'000'000);
+        LOGW("exit: the main thread did not take over, leaving from this one");
+    }
+    Leave();
 }
 
 // hbloader starts the image's NRO after this one exits: sdmc:/switch/scda/scda.nro for default.xbe,
@@ -613,7 +635,7 @@ void Relaunch(const char* exe, const std::string& extra) {
         for (int i = 0; i < 300; i++) svcSleepThread(10'000'000);
         LOGW("relaunch: the main thread did not take over, leaving from this one");
     }
-    LeaveForNextLoad();
+    Leave();
 }
 
 }  // namespace port

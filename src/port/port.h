@@ -34,7 +34,8 @@ bool LogToStderr();
 void Breadcrumb(const char* step);
 // scda.toml's logging off: no boot.txt either (before Init; crash.txt is still written on a crash)
 void SetBootLog(bool on);
-// the platform's setup before anything else runs (log device, exception handler) and its exit
+// the platform's setup before anything else runs (log device, exception handler) and its exit (the Switch: back to the
+// HOME menu, the other threads paused and the services closed first)
 void Init(int argc, char** argv);
 [[noreturn]] void Exit(int code);
 // the player chose to quit (the game mode menu's Exit): the main loop ends, as closing the window does on Windows
@@ -44,7 +45,7 @@ void RequestQuit();
 [[noreturn]] void Relaunch(const char* exe, const std::string& extra);
 bool Relaunched();
 #ifdef __SWITCH__
-// the main thread's event loop: leaves for the NRO Relaunch set once it has been called
+// the main thread's event loop: leaves once Relaunch (for the next NRO) or Exit (for the HOME menu) has been called
 void ServiceRelaunch();
 #endif
 // the arguments this run started with, space separated (--coop-host= and the like, as on Windows)

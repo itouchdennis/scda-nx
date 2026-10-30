@@ -224,7 +224,12 @@ void Relaunch(const char* exe) {
 void Shutdown(int code) {
     LOGR("Exit (%d)", code);
     logx::Flush();
+#ifdef _WIN32
     std::_Exit(code);
+#else
+    // the port's platform leaves its own way (the Switch: its threads paused and services closed, then the HOME menu)
+    port::Exit(code);
+#endif
 }
 
 }  // namespace kernel
