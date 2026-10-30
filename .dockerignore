@@ -1,0 +1,21 @@
+# Only the sources go into the builder image: no git history, no builds, no game data, no recompiled code and no
+# icon of your own (the game's cover art is not ours to publish)
+.git
+.github
+build/
+out/
+assets/
+generated/
+switch_sd/
+third_party/
+switch/icon.jpg
+**/*.iso
+**/*.xiso
+**/*.xbe
+**/*.f32
+**/shaders.vkb
+**/*.nro
+**/*.nacp
+**/*.elf
+**/logs/
+**/hdd/

@@ -163,8 +163,10 @@ if(SCDA_SWITCH)
     set(SCDA_NACP ${CMAKE_CURRENT_BINARY_DIR}/scda.nacp)
     nx_generate_nacp(OUTPUT ${SCDA_NACP} NAME "Splinter Cell: Double Agent" AUTHOR "SCDA XBE Recomp"
         VERSION "0.1.0")
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/switch/icon.jpg)
-        nx_create_nro(scda NACP ${SCDA_NACP} ICON ${CMAKE_CURRENT_SOURCE_DIR}/switch/icon.jpg)
+    # your own 256x256 JPEG for hbmenu, kept out of git: switch/icon.jpg, or one given by path
+    set(SCDA_ICON ${CMAKE_CURRENT_SOURCE_DIR}/switch/icon.jpg CACHE FILEPATH "the NRO's hbmenu icon, if it exists")
+    if(EXISTS ${SCDA_ICON})
+        nx_create_nro(scda NACP ${SCDA_NACP} ICON ${SCDA_ICON})
     else()
         nx_create_nro(scda NACP ${SCDA_NACP})
     endif()

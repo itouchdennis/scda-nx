@@ -27,7 +27,31 @@ There are no prebuilt `.nro` files, and there will not be any. A built NRO holds
 from the XBE, so sharing one would mean sharing the game. Everyone builds their own from their own copy, as below.
 Please do not upload or ask for built NROs.
 
-## The easy way: one command (Arch Linux)
+## The easiest way: Docker (any Linux)
+`build-nro-docker.sh` builds the NRO inside a ready-made builder container, so this computer needs nothing but
+[Docker](https://docs.docker.com/engine/install/): no toolchain, no packages, no `sudo`, no changes to your system.
+The container image (`ghcr.io/itouchdennis/scda-nx-builder`, made from [docker/Dockerfile](docker/Dockerfile) by
+[GitHub Actions](.github/workflows/builder-image.yml)) holds the Switch toolchain, the Vulkan driver and this
+repository's sources, and nothing of the game. Your game is mounted into it read only, and the NRO is made on your
+computer from your own copy.
+```sh
+git clone https://github.com/itouchdennis/scda-nx.git
+cd scda-nx
+./build-nro-docker.sh "/path/to/your Splinter Cell Double Agent.iso"
+```
+The extracted disc's folder (with `default.xbe`) works as well as an `.iso`. When it is done, copy `out/switch` onto
+the root of your SD card and start the game from the Homebrew Menu with title takeover (hold R while starting any
+game). The recompiled code and the build stay in the Docker volume `scda-nx-cache`, so later runs are quicker
+(`docker volume rm scda-nx-cache` removes it). For an icon in the Homebrew Menu, put a 256x256 JPEG at
+`switch/icon.jpg` before building.
+
+> [!CAUTION]
+> The same goes here as for every script: read [build-nro-docker.sh](build-nro-docker.sh),
+> [docker/entrypoint.sh](docker/entrypoint.sh) and [docker/Dockerfile](docker/Dockerfile) before you run them if
+> you are the least bit skeptical. If you would rather not trust a prebuilt image either, build it yourself from the
+> Dockerfile: `SCDA_LOCAL=1 ./build-nro-docker.sh ...` (this takes a while, it compiles the Vulkan driver).
+
+## The easy way without Docker: one command (Arch Linux)
 `build-nro.sh` does every step below by itself: it installs what is missing (asking for your password), sets up
 devkitPro, builds the Switch's Vulkan driver once, extracts your disc image, recompiles the game from it and leaves a
 folder ready for the SD card. Nothing of the game is downloaded or uploaded; everything is made on your computer from
@@ -67,8 +91,7 @@ devkitPro's pacman repositories, as [devkitPro describes them](https://devkitpro
 ```sh
 sudo pacman-key --recv BC26F752D25B92CE272E0F44F7FD5492264BB9D0 --keyserver keyserver.ubuntu.com
 sudo pacman-key --lsign BC26F752D25B92CE272E0F44F7FD5492264BB9D0
-curl -LO https://pkg.devkitpro.org/devkitpro-keyring.pkg.tar.zst
-sudo pacman -U devkitpro-keyring.pkg.tar.zst
+sudo pacman -U https://pkg.devkitpro.org/devkitpro-keyring.pkg.tar.zst
 grep -q '^\[dkp-libs\]' /etc/pacman.conf || printf '\n[dkp-libs]\nServer = https://pkg.devkitpro.org/packages\n\n[dkp-linux]\nServer = https://pkg.devkitpro.org/packages/linux/$arch/\n' | sudo tee -a /etc/pacman.conf >/dev/null
 sudo pacman -Syu
 ```

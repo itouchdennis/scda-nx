@@ -15,6 +15,7 @@
 #                  default only the NRO is staged and the disc is copied to the card once by hand
 #   SD_ROOT        staging SD root (default switch_sd/)
 #   BUILD_DIR      default build/switch-vk, build/switch for SCDA_GPU=gl
+#   SCDA_ICON      the NRO's hbmenu icon, a 256x256 JPEG (default switch/icon.jpg when it exists)
 #   SCDA_GPU       vk (default, Vulkan on mesa-switch's NVK), gl (OpenGL on switch-mesa) or null (draws nothing)
 #   SCDA_NVK_SDK   vk: the Mesa Horizon SDK's portlibs/switch (default build/nvk-sdk/opt/devkitpro/portlibs/switch,
 #                  where switch/nvk/build-nvk.sh installs it)
@@ -47,7 +48,7 @@ fi
 cmake -S "$REPO" -B "$BUILD" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/cmake/Switch.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DSCDA_GEN_DIR="$GEN" -DSCDA_GPU="$GPU" -DSCDA_NVK_SDK="$NVK" -DSCDA_VERBOSE_LOG="$([ "$VERBOSE" = 1 ] && echo ON || echo OFF)" >/dev/null
+    -DSCDA_GEN_DIR="$GEN" -DSCDA_GPU="$GPU" ${SCDA_ICON:+-DSCDA_ICON="$SCDA_ICON"} -DSCDA_NVK_SDK="$NVK" -DSCDA_VERBOSE_LOG="$([ "$VERBOSE" = 1 ] && echo ON || echo OFF)" >/dev/null
 ninja -C "$BUILD" -j"$JOBS"
 
 DEST="$SD/switch/scda"

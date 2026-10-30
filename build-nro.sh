@@ -54,9 +54,8 @@ if ! grep -q '^\[dkp-libs\]' /etc/pacman.conf; then
     ask "Add them to /etc/pacman.conf and import devkitPro's signing key?" || fail "the Switch toolchain is needed"
     sudo pacman-key --recv BC26F752D25B92CE272E0F44F7FD5492264BB9D0 --keyserver keyserver.ubuntu.com
     sudo pacman-key --lsign BC26F752D25B92CE272E0F44F7FD5492264BB9D0
-    keyring="$(mktemp -d)/devkitpro-keyring.pkg.tar.zst"
-    curl -fL https://pkg.devkitpro.org/devkitpro-keyring.pkg.tar.zst -o "$keyring"
-    sudo pacman -U --noconfirm "$keyring"
+    # pacman fetches it itself: devkitPro's server answers pacman only
+    sudo pacman -U --noconfirm https://pkg.devkitpro.org/devkitpro-keyring.pkg.tar.zst
     printf '\n[dkp-libs]\nServer = https://pkg.devkitpro.org/packages\n\n[dkp-linux]\nServer = https://pkg.devkitpro.org/packages/linux/$arch/\n' |
         sudo tee -a /etc/pacman.conf >/dev/null
     sudo pacman -Sy
