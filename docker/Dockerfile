@@ -3,6 +3,10 @@
 # the recompiler and this repository's sources. The game comes in only when the container runs, from a folder you
 # mount, and the NRO is made there, on your computer (docker/entrypoint.sh, build-nro-docker.sh).
 FROM archlinux:base-devel
+# ties the published image to its repository on GitHub (ghcr.io lists it there and takes its description)
+LABEL org.opencontainers.image.source=https://github.com/itouchdennis/scda-nx \
+      org.opencontainers.image.description="Builds the scda-nx Switch NRO from your own copy of the game; holds no game data" \
+      org.opencontainers.image.licenses=MIT
 
 # host packages: the recompiler's and NVK's build tools
 RUN pacman-key --init && pacman-key --populate archlinux && \
