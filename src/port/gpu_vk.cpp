@@ -125,6 +125,7 @@ struct Target {
     uint64_t epoch = 0;          // last lock seen
     uint64_t sig = 0;            // guest memory as last matched
     bool drawn = false;          // the GPU wrote it since the last readback
+    bool fixed = false;          // the shadow map: the console's size at any render scale
     std::vector<uint8_t> read;   // what Sync left in guest memory
 };
 
@@ -321,7 +322,7 @@ private:
     vk::Image* Scratch(uint32_t w, uint32_t h);
     vk::Image* GuestSized(Target& t);
     void Blit(const vk::Image& src, uint32_t sw, uint32_t sh, const vk::Image& dst, uint32_t dw, uint32_t dh);
-    void ApplyRenderScale(const Surface& front);
+    void ApplyRenderScale();
 
     // shaders
     VkShaderEXT MakeShader(vk::Stage stage, const char* entry, const void* code, size_t size, bool binary);
@@ -488,6 +489,7 @@ private:
     struct Late {
         vk::Buffer buf[kLateSlots];
         uint64_t serial[kLateSlots] = {};  // set while the GPU still writes the slot
+        VkFence fence[kLateSlots] = {};    // the slot's command buffer's: DeliverLate sees it finish before PollLate
         bool done[kLateSlots] = {};
         uint64_t seq[kLateSlots] = {};
         uint64_t frame[kLateSlots] = {};
@@ -531,6 +533,9 @@ private:
 bool VkBackend::Init(uint32_t width, uint32_t height) {
     guest_w_ = width;
     guest_h_ = height;
+    // before any target: the first frames are made at the scale they are shown at
+    scale_ = app::RenderScale(guest_h_);
+    LOGI("vk: render scale %.3f", scale_);
 #ifdef SCDA_SWITCH
     // Mesa's own shader cache on the SD card would keep a second copy of shaders.vkb, with writer threads of its own
     setenv("MESA_SHADER_CACHE_DISABLE", "true", 0);
@@ -880,17 +885,41 @@ void VkBackend::Blit(const vk::Image& src, uint32_t sw, uint32_t sh, const vk::I
     pending_ = true;
 }
 
-// a new render scale makes every target again at it, as d3d12.cpp's ApplySettings; the front buffer's height is the
-// console's screen
-void VkBackend::ApplyRenderScale(const Surface& front) {
-    uint32_t gw, gh;
-    SurfaceSize(front, gw, gh);
-    float want = app::RenderScale(gh);
+// a new render scale makes every target again at it, its picture stretched over: a screen only the CPU wrote (the
+// loading screen after a relaunch) is not written again, and a target made new would stay black
+void VkBackend::ApplyRenderScale() {
+    float want = app::RenderScale(guest_h_);
     if (std::fabs(want - scale_) <= 1e-4f) return;
-    while (!targets_.empty()) ReleaseTarget(targets_.begin());
     scale_ = want;
-    LOGI("vk: render scale %.3f, %ux%u for the %ux%u screen", scale_, uint32_t(std::lround(gw * scale_)),
-         uint32_t(std::lround(gh * scale_)), gw, gh);
+    Outside();
+    cur_rt_ = cur_ds_ = nullptr;
+    bound_rt_ = bound_ds_ = nullptr;
+    for (auto& [key, t] : targets_) {
+        if (t.fixed) continue;
+        uint32_t w = std::max(1u, uint32_t(std::lround(float(t.gw) * scale_)));
+        uint32_t h = std::max(1u, uint32_t(std::lround(float(t.gh) * scale_)));
+        if (w == t.w && h == t.h) continue;
+        vk::Image img;
+        VkImageUsageFlags use = t.depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        if (!dev_.CreateImage(img, t.depth ? dev_.depth_format : kColourFormat, w, h, 1, 1, 1, use)) continue;
+        InitLayout(img);
+        if (t.depth) {
+            // depth is drawn again with the next frame
+            VkClearDepthStencilValue z{1.0f, 0};
+            VkImageSubresourceRange all{img.aspect, 0, 1, 0, 1};
+            fn.vkCmdClearDepthStencilImage(Cmd(), img.image, VK_IMAGE_LAYOUT_GENERAL, &z, 1, &all);
+            pending_ = true;
+        } else {
+            Blit(t.img, t.w, t.h, img, w, h);
+        }
+        Retire(t.img);
+        Retire(t.fb);
+        t.img = std::move(img);
+        t.w = w;
+        t.h = h;
+    }
+    LOGI("vk: render scale %.3f, %ux%u for the %ux%u screen", scale_, uint32_t(std::lround(guest_w_ * scale_)),
+         uint32_t(std::lround(guest_h_ * scale_)), guest_w_, guest_h_);
 }
 
 // shaders
@@ -1434,7 +1463,8 @@ Target* VkBackend::EnsureTarget(const Surface& s, bool depth) {
     t.gw = std::max(gw, 1u);
     t.gh = std::max(gh, 1u);
     // the shadow map stays the console's 512 x 512, as d3d12.cpp's at the default shadow resolution
-    float sc = depth && g_shadow.blur_hi && s.data == g_shadow.map ? 1.0f : scale_;
+    t.fixed = depth && g_shadow.blur_hi && s.data == g_shadow.map;
+    float sc = t.fixed ? 1.0f : scale_;
     t.w = std::max(1u, uint32_t(std::lround(float(t.gw) * sc)));
     t.h = std::max(1u, uint32_t(std::lround(float(t.gh) * sc)));
     VkImageUsageFlags use = depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -2197,8 +2227,10 @@ bool VkBackend::DeliverLate(uint32_t data) {
     uint64_t now = presents_seen_.load();
     int best = -1;
     for (int i = 0; i < kLateSlots; i++) {
+        // a signalled fence is this slot's command buffer done, or a later one on the same queue
+        bool finished = l.done[i] || (l.serial[i] && fn.vkGetFenceStatus(dev_.dev, l.fence[i]) == VK_SUCCESS);
         bool recent = now - l.frame[i] <= uint64_t(kLateSlots) + 1;
-        if (l.done[i] && recent && (best < 0 || l.seq[i] > l.seq[best])) best = i;
+        if (finished && recent && (best < 0 || l.seq[i] > l.seq[best])) best = i;
     }
     if (best < 0) return false;
     if (l.seq[best] > l.delivered) {
@@ -2257,6 +2289,7 @@ void VkBackend::CopyLate(Late& l, Target& t) {
                             0, nullptr);
     pending_ = true;
     l.serial[slot] = serial_;
+    l.fence[slot] = subs_[cur_].fence;
     l.done[slot] = false;
     l.seq[slot] = ++late_seq_;
     l.frame[slot] = presents_;
@@ -2371,7 +2404,7 @@ void VkBackend::Present(const Surface& front, bool pillarbox) {
         Swapchain();
     }
     if ((set.brightness << 8 | set.contrast) != ramp_set_) UploadGammaRamp(set.brightness, set.contrast);
-    ApplyRenderScale(front);
+    ApplyRenderScale();
     {
         std::lock_guard lock(late_lock_);
         for (auto& [data, l] : late_) {
