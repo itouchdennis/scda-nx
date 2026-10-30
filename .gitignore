@@ -2,3 +2,5 @@
 /switch/icon.jpg
 # build-nro.sh output: the SD card folder with your NRO and game files
 /out/
+# on-device translation caches, made from a game copy
+code.bin
