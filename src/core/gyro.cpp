@@ -33,6 +33,7 @@ constexpr float kRestSeconds = 2.0f;
 constexpr float kRestGyroSpread = 1.0f;  // degrees a second
 constexpr float kRestAccelSpread = 0.1f;  // metres a second squared
 constexpr float kMaxDrift = 1.5f;  // degrees a second
+constexpr uint64_t kCalibrateNs = 10'000'000'000;  // a calibration the controller did not lie still through gives up
 // turns slower than this are smoothed over kSmoothSeconds, twice as fast pass as they are
 constexpr float kSmoothSpeed = 5.0f;  // degrees a second
 constexpr float kSmoothSeconds = 0.1f;
@@ -111,6 +112,7 @@ struct Motion {
     Vec3 smoothed;  // the slow share of the turn, degrees a second
     RestWindow rest;
     bool calibrating = false;  // the next still window sets the drift, however large
+    uint64_t calibrate_ns = 0;  // NowNs() it started
     bool calibrated = false;  // by hand: rest windows stop, a slow steady turn would pass for drift
     // degrees turned since the last take: about the controller's up, its front, the world's up; pitch down positive
     float yaw = 0;
@@ -324,6 +326,14 @@ uint32_t ButtonBit(uint32_t index) {
 }
 #endif
 
+// a calibration past kCalibrateNs stops, so a controller never laid down does not leave the gyro turning nothing
+void EndStaleCalibration(Motion& m, uint64_t now) {
+    if (!m.calibrating || now - m.calibrate_ns < kCalibrateNs) return;
+    m.calibrating = false;
+    m.rest = {};
+    LOGR("gyro: calibration gave up, the controller did not lie still");
+}
+
 // the gyro button: off or on while held, or a press flips it; no button keeps the gyro on
 bool UpdateSwitch(const Settings& s, const Motion& m) {
     uint32_t bit = ButtonBit(s.button);
@@ -357,6 +367,7 @@ Turn Take(const Settings& s) {
 #ifdef SCDA_SWITCH
     Poll(m);
 #endif
+    EndStaleCalibration(m, now);
     Turn turn;
     if (stale) m.pressed = 0;  // presses while the look did not run
     bool on = UpdateSwitch(s, m);
@@ -377,11 +388,17 @@ void StartCalibration() {
     std::lock_guard lock(g_lock);
     if (!g_motion.pad) return;  // no gyro read yet
     g_motion.calibrating = true;
+    g_motion.calibrate_ns = NowNs();
     g_motion.rest = {};
 }
 
+// the menu asks each frame; on the Switch the sensors are read here too, as the look update does not run in the menu
 bool Calibrating() {
     std::lock_guard lock(g_lock);
+#ifdef SCDA_SWITCH
+    if (g_motion.calibrating) Poll(g_motion);
+#endif
+    EndStaleCalibration(g_motion, NowNs());
     return g_motion.calibrating;
 }
 

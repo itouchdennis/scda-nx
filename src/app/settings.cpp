@@ -69,6 +69,7 @@ std::string SystemLanguage() {
 void LoadGyro(const toml::table& t, gyro::Settings& g) {
     g.enabled = t["gyro_aiming"].value_or(g.enabled);
     g.aim_only = t["gyro_aim_only"].value_or(g.aim_only);
+    g.invert_x = t["gyro_invert_x"].value_or(g.invert_x);
     g.sensitivity = float(t["gyro_sensitivity"].value_or(double(g.sensitivity)));
     g.axis = std::min<uint32_t>(t["gyro_axis"].value_or(g.axis), gyro::kWorld);
     uint32_t last_button = uint32_t(std::size(gyro::kButtonNames) - 1);
@@ -249,6 +250,7 @@ toml::table Table() {
                   {"vibration_strength", int64_t(s.vibration_strength)},
                   {"gyro_aiming", s.gyro.enabled},
                   {"gyro_aim_only", s.gyro.aim_only},
+                  {"gyro_invert_x", s.gyro.invert_x},
                   {"gyro_sensitivity", double(s.gyro.sensitivity)},
                   {"gyro_axis", int64_t(s.gyro.axis)},
                   {"gyro_button", int64_t(s.gyro.button)},

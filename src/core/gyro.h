@@ -20,8 +20,10 @@ struct Settings {
     bool enabled = false;
 #ifdef SCDA_SWITCH
     bool aim_only = true;  // the gyro turns the view only while aiming (weapon raised, sniper scope), not the camera
+    bool invert_x = true;  // the console's sensors turned the view the wrong way left and right
 #else
     bool aim_only = false;
+    bool invert_x = false;
 #endif
     float sensitivity = 2.0f;  // degrees the view turns a degree the controller turns
     uint32_t axis = kYaw;
@@ -40,7 +42,8 @@ struct Turn {
 // game thread, each look update; a turn gathered while the look did not run is dropped
 Turn Take(const Settings& s);
 
-// the drift taken from the next window the controller lies still through; the gyro turns nothing till then
+// the drift taken from the next window the controller lies still through; the gyro turns nothing till then, or till
+// kCalibrateNs pass without one, which keeps the drift it had
 void StartCalibration();
 bool Calibrating();
 

@@ -43,7 +43,7 @@ void ApplyGyro(uint32_t controller) {
     if (s.gyro.aim_only && !input::Aiming()) return;
     if (turn.recenter) W32(controller + kPitch, 0);
     // the gyro's yaw is left positive and its pitch down positive
-    float yaw = s.invert_pad_x ? turn.yaw : -turn.yaw;
+    float yaw = s.invert_pad_x != s.gyro.invert_x ? turn.yaw : -turn.yaw;
     float pitch = s.invert_pad_y ? turn.pitch : -turn.pitch;
     AddUnits(controller + kYaw, TakeUnits(yaw, g_yaw_rest));
     AddUnits(controller + kPitch, TakeUnits(pitch, g_pitch_rest));

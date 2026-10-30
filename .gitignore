@@ -2,3 +2,5 @@
 /switch/icon.jpg
 # build-nro.sh output: the SD card folder with your NRO and game files
 /out/
+# tools/ci/check-build.sh output
+/build/
