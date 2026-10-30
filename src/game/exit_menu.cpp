@@ -1,5 +1,5 @@
-// Exit on the game mode menu (P_OnlineOffline), as SCCT's PC version has: a fifth list item after Solo, Coop, Versus
-// and Credits. Picking it opens the game's own OK / Cancel box, and OK closes the window. Back (B, Escape) on that
+// Exit on the game mode menu (P_OnlineOffline), as SCCT's PC version has: the last list item, after Solo, Coop, Versus
+// (not on the Switch) and Credits. Picking it opens the game's own OK / Cancel box, and OK closes the window. Back (B, Escape) on that
 // page opens the same box instead of returning to the title screen; Cancel leaves the selection where it was.
 #include <string>
 #include <string_view>
@@ -35,6 +35,12 @@ constexpr uint32_t kListName = 0x541C28;   // "Lst_OfflineOnline"
 constexpr uint32_t kIsPage = 0x28FA86;     // thiscall menu (const char* page name): the page is up
 constexpr uint32_t kGameModeName = 0x541A98;  // "P_OnlineOffline"
 constexpr uint32_t kListItems = 0x5C, kListSelection = 0x9C;  // items, selected index (short)
+// the Switch's list has no Versus (xbox_live.cpp's AddItem): from it on, an item is one further to the press handler
+#ifdef SCDA_SWITCH
+constexpr int kVersusIndex = 2;
+#else
+constexpr int kVersusIndex = -1;
+#endif
 // message box (thiscall menu): id, FString* title, FString* text, 4, 1, listener, FString*, FString*, 0, 0, 0,
 // FString*; the empty strings give the OK / Cancel buttons. A listener's vtable +0 is OnAccept(id), +4 OnCancel(id).
 constexpr uint32_t kMessageBox = 0x29388A;
@@ -137,6 +143,14 @@ X86_FUNC(sub_0018697A) {
         Ask(ctx, menu);
         ctx.eax = 1;
         ctx.esp += 8;  // ret 4
+        return;
+    }
+    int16_t selection = list ? int16_t(R16(list + kListSelection)) : -1;
+    if (kVersusIndex >= 0 && list && list == g_list && selection >= kVersusIndex) {
+        // Credits, item 2 without Versus, is 3 to the handler; the selection is back as it was after it
+        W16(list + kListSelection, uint16_t(selection + 1));
+        __imp__sub_0018697A(ctx, base);
+        W16(list + kListSelection, uint16_t(selection));
         return;
     }
     __imp__sub_0018697A(ctx, base);

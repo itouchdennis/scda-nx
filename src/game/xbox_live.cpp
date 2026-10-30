@@ -23,6 +23,9 @@ constexpr uint32_t kOnline = 0x28, kSplit = 0x2C, kLan = 0x30, kOptions = 0x34;
 constexpr uint32_t kOnlineName = 0x546578, kOptionsName = 0x546598;
 // return addresses of the calls that add the Xbox Live items
 constexpr uint32_t kSoloItem = 0x1A67DA;   // solo main menu AddItem(text, 0), the last of its list
+// the Switch: the game mode list's Versus (its third AddItem in sub_00185C2F) goes too. Versus is another image
+// (sc4_adv.xbe), and the Switch has no NRO of it; exit_menu.cpp counts the items after it one further for the game
+constexpr uint32_t kVersusItem = 0x1861AE;
 constexpr uint32_t kPauseItem = 0x18CBC0;  // pause menu item (list, id 8, FString), by value
 constexpr uint32_t kFStringFree = 0x36116;
 
@@ -57,7 +60,12 @@ X86_FUNC(sub_00291D64) {
 // list AddItem (thiscall(text, flag), ret 8, returns the index)
 X86_EXTERN_FUNC(__imp__sub_002C5160);
 X86_FUNC(sub_002C5160) {
-    if (R32(ctx.esp) != kSoloItem) return __imp__sub_002C5160(ctx, base);
+#ifdef SCDA_SWITCH
+    bool drop = R32(ctx.esp) == kSoloItem || R32(ctx.esp) == kVersusItem;
+#else
+    bool drop = R32(ctx.esp) == kSoloItem;
+#endif
+    if (!drop) return __imp__sub_002C5160(ctx, base);
     ctx.esp += 0xC;  // ret 8: the item is never added
 }
 
