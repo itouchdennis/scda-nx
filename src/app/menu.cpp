@@ -329,7 +329,7 @@ enum RowId {
     kSniperSensitivity, kFmvScale, kColourBlind, kAimHorizontal, kAimVertical, kInvertMouseX, kInvertPadX, kInvertPadY,
     kSensitivityVertical, kPadDeadZone, kPadHorizontal, kPadVertical, kPadAimHorizontal, kPadAimVertical,
     kVibration, kGyroAiming, kGyroSensitivity, kGyroAxis, kGyroButton, kGyroButtonMode, kGyroRecenter, kGyroCalibrate,
-    kTextureReplacement, kTextureDumping, kDumpFormat
+    kTextureReplacement, kTextureDumping, kDumpFormat, kSwapAB
 };
 
 using rows::Kind;
@@ -348,18 +348,17 @@ bool VersusHides(int id) {
 
 // what only the D3D12 renderer draws (Windows): the port's Vulkan and OpenGL renderers have no MSAA, SM3 features, soft
 // shadow filter, ambient occlusion or HDR, so their rows go, and settings.cpp keeps them off. The Switch has one screen,
-// always full screen
+// always full screen; the A/B swap is the Switch's alone
 bool PortHides(int id) {
 #ifdef _WIN32
-    (void)id;
-    return false;
+    return id == kSwapAB;
 #else
     bool d3d12_only = id == kShaderModel || id == kHdr || id == kToneMapping || id == kAmbientOcclusion ||
                       id == kMsaa || id == kShadowFilter || id == kHdrOutput;
 #ifdef SCDA_SWITCH
     return d3d12_only || id == kDisplayMode || id == kMonitor;
 #else
-    return d3d12_only;
+    return d3d12_only || id == kSwapAB;
 #endif
 #endif
 }
@@ -392,6 +391,7 @@ constexpr Row kSettingsRows[] = {
     {Kind::Value, kShadowFilter, "SHADOW FILTER"},
     {Kind::Heading, -1, "GENERAL"},
     {Kind::Value, kSkipIntros, "SKIP INTROS"},
+    {Kind::Value, kSwapAB, "SWITCH A/B SWAP"},
     {Kind::Value, kPauseOnFocusLoss, "PAUSE ON FOCUS LOSS"},
     {Kind::Value, kLanguage, "LANGUAGE"},
     {Kind::Value, kAudioOutput, "AUDIO OUTPUT"},
@@ -481,6 +481,7 @@ bool* ToggleFlag(Settings& s, int id) {
         case kToneMapping: return &s.tone_mapping;
         case kSmaa: return &s.smaa;
         case kSkipIntros: return &s.skip_intros;
+        case kSwapAB: return &s.swap_ab;
         case kPauseOnFocusLoss: return &s.pause_on_focus_loss;
         case kPushToTalk: return &s.push_to_talk;
         case kInvertMouse: return &s.invert_mouse;

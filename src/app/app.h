@@ -87,6 +87,11 @@ struct Settings {
     float aim_horizontal_sensitivity = 1.0f;
     float aim_vertical_sensitivity = 1.0f;
     bool skip_intros = false;        // logos video and rating screen at boot
+#ifdef SCDA_SWITCH
+    bool swap_ab = true;             // the Switch's A confirms and B goes back, Nintendo style, in the game and its menus
+#else
+    bool swap_ab = false;            // the Switch only: A and B by label, not by position as the Xbox's
+#endif
     bool pause_on_focus_loss = true;  // the game and its sound stop while the window is in the background
     std::string language = "auto";   // "auto" (the Windows display language) or one of kLanguages
     uint32_t audio_output = 0;       // audio::kOutputAuto, kOutputStereo, kOutputSurround or kOutputMono
