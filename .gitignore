@@ -1,2 +1,4 @@
 # your own NRO icon (the game's cover art is not ours to publish)
 /switch/icon.jpg
+# build-nro.sh output: the SD card folder with your NRO and game files
+/out/
