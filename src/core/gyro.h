@@ -18,6 +18,11 @@ inline constexpr const char* kButtonModeNames[] = {"OFF WHILE HELD", "ON WHILE H
 
 struct Settings {
     bool enabled = false;
+#ifdef SCDA_SWITCH
+    bool aim_only = true;  // the gyro turns the view only while aiming (weapon raised, sniper scope), not the camera
+#else
+    bool aim_only = false;
+#endif
     float sensitivity = 2.0f;  // degrees the view turns a degree the controller turns
     uint32_t axis = kYaw;
     uint32_t button = 0;  // index in kButtonNames

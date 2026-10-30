@@ -1,5 +1,5 @@
 // Gyro aiming: the gyro's turn is added to the player controller's rotation before the camera update reads it, so
-// the camera's own pitch clamp holds it.
+// the camera's own pitch clamp holds it. With aim_only, only while aiming (input::Aiming: weapon raised, sniper scope).
 #include <cmath>
 
 #include "app/app.h"
@@ -37,8 +37,10 @@ namespace game {
 // the player controller's camera update, before it reads the rotation; a synced co-op session carries the pad only
 void ApplyGyro(uint32_t controller) {
     const app::Settings& s = app::Get();
+    // taken every update all the same, so no turn gathered before aiming is let out when it starts
     gyro::Turn turn = gyro::Take(s.gyro);
     if (app::MenuOpen() || input::NetSession()) return;
+    if (s.gyro.aim_only && !input::Aiming()) return;
     if (turn.recenter) W32(controller + kPitch, 0);
     // the gyro's yaw is left positive and its pitch down positive
     float yaw = s.invert_pad_x ? turn.yaw : -turn.yaw;

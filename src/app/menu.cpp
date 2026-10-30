@@ -329,7 +329,7 @@ enum RowId {
     kSniperSensitivity, kFmvScale, kColourBlind, kAimHorizontal, kAimVertical, kInvertMouseX, kInvertPadX, kInvertPadY,
     kSensitivityVertical, kPadDeadZone, kPadHorizontal, kPadVertical, kPadAimHorizontal, kPadAimVertical,
     kVibration, kGyroAiming, kGyroSensitivity, kGyroAxis, kGyroButton, kGyroButtonMode, kGyroRecenter, kGyroCalibrate,
-    kTextureReplacement, kTextureDumping, kDumpFormat, kSwapAB, kSwapXY
+    kTextureReplacement, kTextureDumping, kDumpFormat, kSwapAB, kSwapXY, kGyroAimOnly
 };
 
 using rows::Kind;
@@ -337,7 +337,7 @@ using rows::Row;
 
 constexpr bool kVersus = std::string_view(IMAGE_XBE) == "sc4_adv.xbe";
 
-bool IsGyroRow(int id) { return id >= kGyroAiming && id <= kGyroCalibrate; }
+bool IsGyroRow(int id) { return (id >= kGyroAiming && id <= kGyroCalibrate) || id == kGyroAimOnly; }
 
 // versus has no SM3 renderer or shadow options of story, nor co-op rows and gyro aiming
 bool VersusHides(int id) {
@@ -448,6 +448,7 @@ const std::vector<Row>& PadRows() {
                                 {Kind::Value, kVibration, "VIBRATION STRENGTH"},
                                 {Kind::Heading, -1, "GYRO"},
                                 {Kind::Value, kGyroAiming, "GYRO AIMING"},
+                                {Kind::Value, kGyroAimOnly, "GYRO ONLY WHILE AIMING"},
                                 {Kind::Value, kGyroSensitivity, "GYRO SENSITIVITY"},
                                 {Kind::Value, kGyroAxis, "GYRO AXIS"},
                                 {Kind::Value, kGyroButton, "GYRO BUTTON"},
@@ -493,6 +494,7 @@ bool* ToggleFlag(Settings& s, int id) {
         case kInvertPadX: return &s.invert_pad_x;
         case kInvertPadY: return &s.invert_pad_y;
         case kGyroAiming: return &s.gyro.enabled;
+        case kGyroAimOnly: return &s.gyro.aim_only;
         case kTextureReplacement: return &s.custom_textures;
         case kTextureDumping: return &s.dump_textures;
         default: return nullptr;
