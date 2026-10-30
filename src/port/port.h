@@ -45,6 +45,8 @@ void RequestQuit();
 [[noreturn]] void Relaunch(const char* exe, const std::string& extra);
 bool Relaunched();
 #ifdef __SWITCH__
+// the CPU at this many MHz, as the CPU clock setting asks
+void ApplyCpuClock(uint32_t mhz);
 // the main thread's event loop: leaves once Relaunch (for the next NRO) or Exit (for the HOME menu) has been called
 void ServiceRelaunch();
 #endif

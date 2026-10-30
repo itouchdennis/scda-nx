@@ -57,7 +57,13 @@ constexpr uint32_t kAudioOutputs[] = {audio::kOutputAuto, audio::kOutputMono, au
 const char* const kAudioOutputNames[] = {"AUTOMATIC", "MONO", "2.0 STEREO", "5.1 SURROUND"};
 constexpr uint32_t kShadowSizes[] = {0, 512, 1024, 2048, 4096, 8192};
 constexpr uint32_t kShadowDistances[] = {1, 2, 4, 8};
+#ifdef SCDA_SWITCH
+constexpr uint32_t kFpsCaps[] = {30, 60};
+#else
 constexpr uint32_t kFpsCaps[] = {30, 60, 75, 90, 120, 144, 165, 240, 360, kFpsCapRefresh, 0};
+#endif
+// the CPU clocks the Switch runs at, MHz
+constexpr uint32_t kCpuClocks[] = {1020, 1224, 1428, 1581, 1785};
 constexpr uint32_t kVersusFpsCaps[] = {30, 60, 75, 90, 120, 144, 165, kVersusMaxFps, kFpsCapRefresh, 0};
 // co-op steps last whole ms, so each rate is the top of its step: 1000/rate rounds down to the same period
 constexpr uint32_t kTickRates[] = {0, 30, 50, 60, 100, 111, 125, 142};
@@ -330,7 +336,7 @@ enum RowId {
     kSensitivityVertical, kPadDeadZone, kPadHorizontal, kPadVertical, kPadAimHorizontal, kPadAimVertical,
     kVibration, kGyroAiming, kGyroSensitivity, kGyroAxis, kGyroButton, kGyroButtonMode, kGyroRecenter, kGyroCalibrate,
     kTextureReplacement, kTextureDumping, kDumpFormat, kSwapAB, kSwapXY, kGyroAimOnly,
-    kGyroInvertX
+    kGyroInvertX, kCpuClock
 };
 
 using rows::Kind;
@@ -352,7 +358,7 @@ bool VersusHides(int id) {
 // always full screen; the button layout rows are the Switch's alone
 bool PortHides(int id) {
 #ifdef _WIN32
-    return id == kSwapAB || id == kSwapXY;
+    return id == kSwapAB || id == kSwapXY || id == kCpuClock;
 #else
     bool d3d12_only = id == kShaderModel || id == kHdr || id == kToneMapping || id == kAmbientOcclusion ||
                       id == kMsaa || id == kShadowFilter || id == kHdrOutput;
@@ -361,7 +367,7 @@ bool PortHides(int id) {
     return d3d12_only || id == kDisplayMode || id == kMonitor || id == kGyroButton || id == kGyroButtonMode ||
            id == kGyroRecenter;
 #else
-    return d3d12_only || id == kSwapAB || id == kSwapXY;
+    return d3d12_only || id == kSwapAB || id == kSwapXY || id == kCpuClock;
 #endif
 #endif
 }
@@ -378,6 +384,7 @@ constexpr Row kSettingsRows[] = {
     {Kind::Value, kVsync, "VERTICAL SYNC"},
     {Kind::Value, kHdrOutput, "HDR OUTPUT"},
     {Kind::Value, kMaxFps, "MAX FRAME RATE"},
+    {Kind::Value, kCpuClock, "CPU CLOCK"},
     {Kind::Value, kFpsCounter, "FPS COUNTER"},
     {Kind::Value, kFmvScale, "FMV SCALE"},
     {Kind::Value, kColourBlind, "COLOUR BLIND MODE"},
@@ -620,6 +627,11 @@ bool StepDisplayRow(int id, int step, Settings& s, char (&text)[64]) {
             if (cap == kFpsCapRefresh) std::snprintf(text, sizeof(text), "REFRESH RATE");
             else if (cap) std::snprintf(text, sizeof(text), "%u", cap);
             else std::snprintf(text, sizeof(text), "UNLIMITED");
+            return true;
+        }
+        case kCpuClock: {
+            uint32_t mhz = kCpuClocks[StepTable(kCpuClocks, s.cpu_clock, step)];
+            std::snprintf(text, sizeof(text), mhz == 1785 ? "%u MHZ (DEFAULT)" : "%u MHZ", mhz);
             return true;
         }
         default:

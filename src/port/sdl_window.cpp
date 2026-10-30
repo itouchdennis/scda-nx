@@ -349,6 +349,14 @@ void* MenuCursor() { return nullptr; }
 bool PrepareGameCode(const GameFiles&) { return dispatch::Load({}); }
 
 void Pace() {
+#ifdef SCDA_SWITCH
+    // the CPU clock setting, from the first frame on and as it changes
+    static uint32_t clocked = 0;
+    if (Get().cpu_clock != clocked) {
+        clocked = Get().cpu_clock;
+        port::ApplyCpuClock(clocked);
+    }
+#endif
     using clock = std::chrono::steady_clock;
     static clock::time_point next = clock::now();
     uint32_t cap = Get().fps_cap;

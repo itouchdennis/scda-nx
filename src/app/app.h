@@ -41,6 +41,7 @@ struct Settings {
     uint32_t width = 0, height = 0;  // 0 is the desktop mode
     uint32_t render_percent = 100;   // of the output height
     uint32_t fps_cap = kFpsCapRefresh;  // 0 unlimited, kFpsCapRefresh the monitor's refresh rate
+    uint32_t cpu_clock = 1785;         // MHz, the Switch's CPU while the game runs; lower saves the battery
     uint32_t fov = 75;               // horizontal degrees on a 4:3 frame, 75 is the game's
     uint32_t brightness = 50;        // 0 to 100 as SCCT PC's sliders, 50 each leaves the picture alone
     uint32_t contrast = 50;

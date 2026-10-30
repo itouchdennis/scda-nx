@@ -109,6 +109,11 @@ void Load() {
     s.height = t["height"].value_or(s.height);
     s.render_percent = t["render_percent"].value_or(s.render_percent);
     s.fps_cap = t["fps_cap"].value_or(s.fps_cap);
+#ifdef SCDA_SWITCH
+    // the Switch's screen and TV are 60 Hz: 30 or 60, the menu's two
+    s.fps_cap = s.fps_cap == 30 ? 30 : 60;
+    s.cpu_clock = std::clamp<uint32_t>(t["cpu_clock"].value_or(s.cpu_clock), 1020, 1785);
+#endif
     s.fov = std::clamp(t["fov"].value_or(s.fov), 45u, 140u);
     s.brightness = std::min(t["brightness"].value_or(s.brightness), 100u);
     s.contrast = std::min(t["contrast"].value_or(s.contrast), 100u);
@@ -212,6 +217,7 @@ toml::table Table() {
                   {"height", int64_t(s.height)},
                   {"render_percent", int64_t(s.render_percent)},
                   {"fps_cap", int64_t(s.fps_cap)},
+                  {"cpu_clock", int64_t(s.cpu_clock)},
                   {"fov", int64_t(s.fov)},
                   {"brightness", int64_t(s.brightness)},
                   {"contrast", int64_t(s.contrast)},

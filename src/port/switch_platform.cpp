@@ -135,6 +135,14 @@ void RaiseClocks() {
          ClockRate(PcvModuleId_GPU) / 1000000);
 }
 
+}  // namespace
+
+void ApplyCpuClock(uint32_t mhz) {
+    bool ok = SetCpuClock(mhz * 1000000);
+    LOGI("clocks: CPU %u MHz%s", ClockRate(PcvModuleId_CpuBus) / 1000000, ok ? "" : " (not set)");
+}
+
+namespace {
 void RestoreClocks() {
     SetCpuClock(kCpuNormal);
     appletSetCpuBoostMode(ApmCpuBoostMode_Normal);

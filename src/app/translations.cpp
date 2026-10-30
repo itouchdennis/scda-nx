@@ -39,6 +39,7 @@ constexpr Entry kEntries[] = {
     {"BRIGHTNESS", {u"Luminosité", u"Helligkeit", u"Luminosità", u"Brillo"}},
     {"CONTRAST", {u"Contraste", u"Kontrast", u"Contrasto", u"Contraste"}},
     {"VERTICAL SYNC", {u"Synchro verticale", u"V-Sync", u"Sincronia verticale", u"Sincronismo vertical"}},
+    {"CPU CLOCK", {u"Fréquence du CPU", u"CPU-Takt", u"Frequenza della CPU", u"Frecuencia de la CPU"}},
     {"MAX FRAME RATE", {u"Images par seconde max.", u"Max. Bildrate", u"Frame rate massimo", u"Fotogramas por segundo máx."}},
     {"FPS COUNTER", {u"Compteur d'images par seconde", u"FPS-Anzeige", u"Contatore FPS", u"Contador de FPS"}},
     {"SHADER MODEL", {u"Modèle de shader", u"Shader Model", u"Modello di shader", u"Modelo de shader"}},
