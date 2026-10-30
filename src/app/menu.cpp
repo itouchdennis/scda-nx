@@ -631,7 +631,7 @@ bool StepDisplayRow(int id, int step, Settings& s, char (&text)[64]) {
         }
         case kCpuClock: {
             uint32_t mhz = kCpuClocks[StepTable(kCpuClocks, s.cpu_clock, step)];
-            std::snprintf(text, sizeof(text), mhz == 1785 ? "%u MHZ (DEFAULT)" : "%u MHZ", mhz);
+            std::snprintf(text, sizeof(text), mhz == 1020 ? "%u MHZ (DEFAULT)" : "%u MHZ", mhz);
             return true;
         }
         default:

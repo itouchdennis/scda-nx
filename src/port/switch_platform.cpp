@@ -100,15 +100,14 @@ std::string g_command_line;
 bool g_relaunched = false;
 bool g_sockets = false;
 
-// The highest clocks Nintendo gives games, no overclock: that is left to the players' own tools. FastLoad boost takes
-// the CPU to 1785 MHz but drops the GPU to 76.8 MHz; the clocks are set one by one instead
-constexpr u32 kCpuFast = 1785000000;
-constexpr u32 kCpuNormal = 1020000000;
-constexpr u32 kGpuHandheld = 460800000;  // the most a game gets in handheld
+// Nintendo's official clocks for games, no boost mode and no overclock: that is left to the players' own tools
+// (sys-clk). The CPU follows its setting, 1020 MHz unless the player picks more
+constexpr u32 kCpuOfficial = 1020000000;
+constexpr u32 kGpuHandheld = 384000000;
 constexpr u32 kGpuDocked = 768000000;
-constexpr u32 kGpuHandheldNormal = 307200000;
-constexpr u32 kMemoryFast = 1600000000;  // docked's, and boost mode's in handheld
-constexpr u32 kMemoryHandheldNormal = 1331200000;
+constexpr u32 kGpuHandheldLow = 307200000;  // the other official handheld clock, what the homebrew menu gets back
+constexpr u32 kMemoryHandheld = 1331200000;
+constexpr u32 kMemoryDocked = 1600000000;
 constexpr u64 kModeCheckNs = 1'000'000'000;
 
 bool SetClock(PcvModuleId module, u32 hz) {
@@ -137,11 +136,11 @@ u32 ClockRate(PcvModuleId module) {
 
 bool Docked() { return appletGetOperationMode() == AppletOperationMode_Console; }
 
-// the CPU at cpu_hz, the GPU and the memory at the most a game gets in the console's mode
+// the CPU at cpu_hz, the GPU and the memory at the official clocks of the console's mode
 void SetClocks(u32 cpu_hz, bool docked) {
     bool cpu = SetClock(PcvModuleId_CpuBus, cpu_hz);
     bool gpu = SetClock(PcvModuleId_GPU, docked ? kGpuDocked : kGpuHandheld);
-    bool mem = SetClock(PcvModuleId_EMC, kMemoryFast);
+    bool mem = SetClock(PcvModuleId_EMC, docked ? kMemoryDocked : kMemoryHandheld);
     LOGI("clocks (%s): CPU %u MHz%s, GPU %u MHz%s, memory %u MHz%s", docked ? "docked" : "handheld",
          ClockRate(PcvModuleId_CpuBus) / 1000000, cpu ? "" : " (not set)", ClockRate(PcvModuleId_GPU) / 1000000,
          gpu ? "" : " (not set)", ClockRate(PcvModuleId_EMC) / 1000000, mem ? "" : " (not set)");
@@ -149,7 +148,7 @@ void SetClocks(u32 cpu_hz, bool docked) {
 
 void RaiseClocks() {
     appletSetCpuBoostMode(ApmCpuBoostMode_Normal);
-    SetClocks(kCpuFast, Docked());
+    SetClocks(kCpuOfficial, Docked());
 }
 
 }  // namespace
@@ -174,9 +173,9 @@ namespace {
 // what the homebrew menu after the game gets: the system's own clocks for the mode
 void RestoreClocks() {
     bool docked = Docked();
-    SetClock(PcvModuleId_CpuBus, kCpuNormal);
-    SetClock(PcvModuleId_GPU, docked ? kGpuDocked : kGpuHandheldNormal);
-    SetClock(PcvModuleId_EMC, docked ? kMemoryFast : kMemoryHandheldNormal);
+    SetClock(PcvModuleId_CpuBus, kCpuOfficial);
+    SetClock(PcvModuleId_GPU, docked ? kGpuDocked : kGpuHandheldLow);
+    SetClock(PcvModuleId_EMC, docked ? kMemoryDocked : kMemoryHandheld);
     appletSetCpuBoostMode(ApmCpuBoostMode_Normal);
 }
 }  // namespace
