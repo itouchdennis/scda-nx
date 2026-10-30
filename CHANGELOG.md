@@ -2,6 +2,13 @@
 There are no prebuilt NROs in any release: each release holds the source and the build scripts. You build the NRO
 yourself, from your own copy of the game ([docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md)).
 
+## Unreleased
+- **CI without the game:** every push and pull request compiles the Linux port (Vulkan, OpenGL and null renderers)
+  and the Switch port, checks the shell scripts, and runs `build-nro-windows.bat` on a real Windows runner up to
+  the point where it needs Docker. Nothing is linked and no NRO is made: the one header from the game the sources
+  include, `image_symbols.h`, is made from `config/scda_v2.toml` (`tools/ci/`, `SCDA_CHECK_ONLY`).
+- `SCDA_NO_PAUSE=1` makes `build-nro-windows.bat` close at once instead of waiting for Enter.
+
 ## v0.3.0
 **Note: Windows has not been tested yet.** `build-nro-windows.bat` was written for Windows 10 and 11 but has not been
 run on a real Windows PC: in the test VM, Docker Desktop could not start (nested Hyper-V). Only the Linux builders

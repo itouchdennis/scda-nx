@@ -16,6 +16,7 @@ exit /b %errorlevel%
 #   OUT                 the output folder (default out\ beside this file)
 #   SCDA_ICON           your own 256x256 JPEG for the Homebrew Menu (default icon.jpg or switch\icon.jpg beside this file)
 #   SCDA_ANY_RELEASE=1  build from a release other than the tested one
+#   SCDA_NO_PAUSE=1     close at once at the end instead of waiting for Enter (CI)
 
 # native tools report through exit codes here: with Stop, Windows PowerShell would turn their stderr into errors
 $ErrorActionPreference = 'Continue'
@@ -24,8 +25,10 @@ $Here = Split-Path -Parent $env:SCDA_SELF
 $Out = if ($env:OUT) { $env:OUT } else { Join-Path $Here 'out' }
 
 function Finish($code) {
-    Write-Host ''
-    Read-Host 'Press Enter to close this window' | Out-Null
+    if (-not $env:SCDA_NO_PAUSE) {
+        Write-Host ''
+        Read-Host 'Press Enter to close this window' | Out-Null
+    }
     exit $code
 }
 function Fail($msg) {

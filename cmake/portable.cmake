@@ -4,6 +4,7 @@
 #   SCDA_GEN_DIR   generated code of default.xbe (default generated/game); a cross build (Switch) takes it from a
 #                  native build or tools/regen.sh, which runs xbe_recomp on the host
 #   SCDA_SWITCH    set by switch/build.sh: libnx platform layer, NRO
+#   SCDA_CHECK_ONLY  CI: the port's own sources compiled, nothing linked and no game needed (tools/ci/check-build.sh)
 
 option(SCDA_SWITCH "Nintendo Switch homebrew build" ${NINTENDO_SWITCH})
 # char is signed on x86, where all of this was written, and unsigned on AArch64: keep x86's
@@ -11,6 +12,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64" OR SCDA_SWITCH)
     add_compile_options(-fsigned-char)
 endif()
 option(SCDA_VERBOSE_LOG "the debug build's full log in a release build" OFF)
+option(SCDA_CHECK_ONLY "compile the port's own sources only: no recompiled code, no executable" OFF)
 set(SCDA_GPU null CACHE STRING
     "renderer: vk (Vulkan 1.3 with shader objects), gl (OpenGL 4.3), or null (draws nothing, for testing the rest)")
 # the Switch's Vulkan: mesa-switch's static NVK, installed as a portlibs tree (../mesa-build/build-linux.sh)
@@ -34,7 +36,11 @@ math(EXPR last "${SCDA_PARTITIONS} - 1")
 foreach(i RANGE ${last})
     list(APPEND GEN_SOURCES ${GEN}/x86_recomp.${i}.cpp)
 endforeach()
-if(NOT CMAKE_CROSSCOMPILING)
+if(SCDA_CHECK_ONLY)
+    if(NOT EXISTS ${GEN}/image_symbols.h)
+        message(FATAL_ERROR "no image_symbols.h in ${GEN}: tools/ci/symbols_header.py makes it from the config")
+    endif()
+elseif(NOT CMAKE_CROSSCOMPILING)
     add_custom_command(
         OUTPUT ${GEN}/codegen.stamp
         BYPRODUCTS ${GEN_SOURCES} ${GEN}/x86_recomp_shared.h ${GEN}/image_symbols.h
@@ -50,11 +56,13 @@ elseif(NOT EXISTS ${GEN}/image_symbols.h)
 endif()
 
 # the recompiled code: strict aliasing off as on Windows, warnings off (generated), no frame pointer needed
-add_library(scda_code OBJECT ${GEN_SOURCES})
-target_include_directories(scda_code PRIVATE src ${GEN})
-target_compile_options(scda_code PRIVATE -O2 -fno-strict-aliasing -w)
-if(NOT CMAKE_CROSSCOMPILING)
-    add_dependencies(scda_code recompile)
+if(NOT SCDA_CHECK_ONLY)
+    add_library(scda_code OBJECT ${GEN_SOURCES})
+    target_include_directories(scda_code PRIVATE src ${GEN})
+    target_compile_options(scda_code PRIVATE -O2 -fno-strict-aliasing -w)
+    if(NOT CMAKE_CROSSCOMPILING)
+        add_dependencies(scda_code recompile)
+    endif()
 endif()
 
 # the host: what has no Windows parts as it is, the ported files and the port's own layer in src/port
@@ -146,7 +154,11 @@ if(NOT SCDA_GPU STREQUAL "null")
 endif()
 set(SDL_VULKAN 0)
 
-add_executable(scda ${HOST_SOURCES} ${GAME_SOURCES} ${IMGUI_SOURCES} $<TARGET_OBJECTS:scda_code>)
+if(SCDA_CHECK_ONLY)
+    add_library(scda OBJECT ${HOST_SOURCES} ${GAME_SOURCES} ${IMGUI_SOURCES})
+else()
+    add_executable(scda ${HOST_SOURCES} ${GAME_SOURCES} ${IMGUI_SOURCES} $<TARGET_OBJECTS:scda_code>)
+endif()
 target_include_directories(scda PRIVATE src src/port/include ${GEN})
 target_include_directories(scda SYSTEM PRIVATE ${imgui_SOURCE_DIR} ${GPU_INCLUDES})
 target_compile_options(scda PRIVATE -fno-strict-aliasing -Wno-unused-parameter)
@@ -159,6 +171,8 @@ if(SCDA_SWITCH)
     target_link_options(scda PRIVATE "LINKER:--wrap=SDL_SYS_SetThreadPriority"
         "LINKER:--wrap=threadCreate" "LINKER:--wrap=threadClose"
         "LINKER:--wrap=condvarWaitTimeout")
+endif()
+if(SCDA_SWITCH AND NOT SCDA_CHECK_ONLY)
     # the NRO for hbmenu: sdmc:/switch/scda/scda.nro
     set(SCDA_NACP ${CMAKE_CURRENT_BINARY_DIR}/scda.nacp)
     nx_generate_nacp(OUTPUT ${SCDA_NACP} NAME "Splinter Cell: Double Agent" AUTHOR "SCDA XBE Recomp"

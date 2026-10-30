@@ -1,0 +1,112 @@
+# Checks every push and pull request without the game: no game data and no code made from the game ever passes through
+# here, so nothing is linked and no NRO is made. What it checks:
+#   scripts   the shell scripts' syntax and shellcheck's warnings, the Windows script's PowerShell and line endings
+#   linux     the Linux port compiles with each renderer (vk, gl, null), and the recompiler builds
+#   switch    the Switch port compiles in the builder image (devkitPro, NVK), and the builder refuses what is not the game
+#   windows   build-nro-windows.bat starts on a real Windows, refuses a missing game, and stops with a message when the
+#             builder cannot run (the runner has no Linux containers)
+# image_symbols.h, which the port's sources include, is made from config/scda_v2.toml (tools/ci/symbols_header.py),
+# byte for byte what the recompiler writes, so the compile needs no default.xbe (tools/ci/check-build.sh).
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: for f in build-nro.sh build-nro-docker.sh docker/*.sh switch/*.sh switch/nvk/*.sh switch/nvk/bin/rustc tools/*.sh tools/ci/*.sh; do bash -n "$f"; done
+      - name: shellcheck
+        run: shellcheck -S warning build-nro.sh build-nro-docker.sh docker/*.sh switch/*.sh switch/nvk/*.sh tools/*.sh tools/ci/*.sh
+      - name: Windows script
+        shell: pwsh
+        run: |
+          $text = Get-Content -Raw build-nro-windows.bat
+          if ($text -notmatch "`r`n") { throw "build-nro-windows.bat needs CRLF line endings (.gitattributes)" }
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Message)" }; exit 1 }
+
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu: [vk, gl, null]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 libsdl2-dev libvulkan-dev libgl-dev
+      - name: Compile
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: tools/ci/check-build.sh linux ${{ matrix.gpu }}
+
+  switch:
+    runs-on: ubuntu-latest
+    container: ghcr.io/itouchdennis/scda-nx-builder:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile
+        env:
+          SCDA_NVK_SDK: /opt/nvk-sdk/opt/devkitpro/portlibs/switch
+        run: |
+          git config --global --add safe.directory "$PWD"
+          tools/ci/check-build.sh switch vk
+      - name: The builder refuses what is not the game
+        shell: bash
+        run: |
+          expect_fail() {
+              local want="$1" out
+              shift
+              if out="$("$@" 2>&1)"; then echo "$out"; echo "expected a failure"; exit 1; fi
+              echo "$out"
+              grep -qF "$want" <<<"$out" || { echo "expected: $want"; exit 1; }
+          }
+          mkdir -p /out /cache
+          expect_fail "no game mounted at /game" docker/entrypoint.sh
+          mkdir -p /game
+          expect_fail "has no default.xbe" docker/entrypoint.sh
+          head -c 4096 /dev/urandom > /game/default.xbe
+          expect_fail "not the release this port was tested with" docker/entrypoint.sh
+
+  windows:
+    runs-on: windows-latest
+    env:
+      SCDA_NO_PAUSE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: A missing game is refused
+        shell: cmd
+        run: |
+          call build-nro-windows.bat "C:\no\such\game.iso" > out.txt 2>&1
+          set rc=%errorlevel%
+          type out.txt
+          if not "%rc%"=="1" (echo expected exit code 1 & exit /b 1)
+          findstr /c:"no such file or folder" out.txt || exit /b 1
+      # the runner has no Linux containers: with its Docker the pull fails, without it Docker does not answer; either
+      # way the script has to stop with a message
+      - name: No usable Docker is reported
+        shell: cmd
+        run: |
+          echo not a game> "%RUNNER_TEMP%\fake.iso"
+          call build-nro-windows.bat "%RUNNER_TEMP%\fake.iso" > out.txt 2>&1
+          set rc=%errorlevel%
+          type out.txt
+          if not "%rc%"=="1" (echo expected exit code 1 & exit /b 1)
+          findstr /c:"could not download" /c:"Docker does not answer" out.txt || exit /b 1
