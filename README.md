@@ -24,6 +24,24 @@ mesa-switch's NVK and runs on Linux as well, which serves as its test bed.
 This project is not affiliated with or endorsed by Ubisoft, Microsoft or Nintendo. All trademarks belong to their
 respective owners.
 
+## Contents
+- [No prebuilt NROs](#no-prebuilt-nros)
+- [How to build it: Windows and Linux in a few clicks](#how-to-build-it-windows-and-linux-in-a-few-clicks)
+  - [Windows (10 or 11)](#windows-10-or-11)
+  - [Linux](#linux)
+  - [Then on the Switch](#then-on-the-switch)
+- [The easy way without Docker: one command (Arch Linux)](#the-easy-way-without-docker-one-command-arch-linux)
+- [Building for the Nintendo Switch by hand (Arch Linux)](#building-for-the-nintendo-switch-by-hand-arch-linux)
+  - [1. Host packages](#1-host-packages)
+  - [2. devkitPro](#2-devkitpro)
+  - [3. Sources](#3-sources)
+  - [4. NVK](#4-nvk)
+  - [5. Your game files](#5-your-game-files)
+  - [6. The NRO](#6-the-nro)
+  - [7. On the Switch](#7-on-the-switch)
+- [Changes](#changes)
+- [Credits](#credits)
+
 ## No prebuilt NROs
 There are no prebuilt `.nro` files, and there will not be any. A built NRO holds the game's own code, recompiled
 from the XBE, so sharing one would mean sharing the game. Everyone builds their own from their own copy, as below.

@@ -2,6 +2,20 @@
 There are no prebuilt NROs in any release: each release holds the source and the build scripts. You build the NRO
 yourself, from your own copy of the game ([docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md)).
 
+## v0.4.6
+- **Sharper picture on the Switch:** *Render Resolution* (Recomp Settings > Display) now works in the Vulkan
+  renderer. The game is drawn at that share of the output's height: at 100% (the default) 960x720 at 720p and
+  1440x1080 at 1080p, instead of the Xbox's 640x480 stretched up. Text and edges are no longer blurry. About 67%
+  at 720p gives the old 640x480. The shadow map stays at the console's 512x512.
+- **SMAA on the Switch:** the *SMAA* setting smooths edges in the Vulkan renderer too. It costs frame rate on the
+  Switch, as does anisotropic filtering; both are off by default.
+- **Fewer stalls while a level starts:** the game reads a small surface back every frame then, and each read waited
+  for the GPU (up to 170 ms at a time). A finished copy is now ready for it instead.
+- **Gyro:** *Invert gyro X axis* (on by default on the Switch, where turning right turned the view left).
+  *Calibrate gyro* no longer leaves the gyro dead: it now measures in the menu too, and gives up after 10 seconds
+  if the console is not lying still.
+- No more false "out of GPU memory" errors in the log.
+
 ## v0.4.5
 - **Gyro aiming on the Switch:** the Joy-Con (handheld or as a pair) and the Pro Controller turn the view by their
   motion sensors. Off by default: Recomp Settings > Controller > Gyro > Gyro Aiming. *Gyro only while aiming* (on by
