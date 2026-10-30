@@ -12,14 +12,15 @@
 // The viewport's height is negative: D3D's clip space and its windings as they are, row 0 of every target the top.
 // All images stay in the GENERAL layout; render passes, copies and uploads are ordered by a barrier between them.
 //
-// Not here yet, as with OpenGL: render scale, MSAA, SMAA, shader model 3 HDR and soft shadows, ambient occlusion, the
-// texture pack, captures, the settings panel.
+// SMAA over the shown frame as d3d12.cpp's (smaa_shader.h). Not here yet, as with OpenGL: render scale, MSAA, shader
+// model 3 HDR and soft shadows, ambient occlusion, the texture pack, captures, the settings panel.
 #include <SDL.h>
 #include <dxgiformat.h>
 #include <pthread.h>
 
 #include <algorithm>
 #include <array>
+#include <initializer_list>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -37,6 +38,8 @@
 #include "core/log.h"
 #include "gpu/backend.h"
 #include "gpu/shaders.h"
+#include "gpu/smaa_shader.h"
+#include "gpu/smaa_textures.h"
 #include "gpu/texture.h"
 #include "gpu/vertex.h"
 #include "kernel/kernel.h"
@@ -325,6 +328,16 @@ private:
     void Request(Resolved& r, std::string hlsl, vk::Stage stage, const char* entry);
     bool Lookup(Resolved& r);
     void CreateBlit();
+    // the build threads done with these, their objects looked up
+    void Await(std::initializer_list<Resolved*> shaders);
+    // the full screen state of the present and post passes: one triangle, nothing tested or blended
+    void PostState(const VkViewport& vp, const VkRect2D& sc, const float constants[4]);
+    // a full screen pass into out (w x h): b1 the params, t0 to t2 the views (a dummy where null), s0 linear, s1 point
+    void DrawPost(const vk::Image& out, uint32_t w, uint32_t h, bool clear, const Resolved& vs, const Resolved& ps,
+                  const float* params, size_t bytes, std::initializer_list<VkImageView> views);
+    // SMAA's blend of the frame t holds, null when it cannot run (its shaders failed)
+    const vk::Image* Smaa(const Target& t);
+    bool EnsureSmaa(uint32_t w, uint32_t h);
     VkSampler Sampler(const SamplerDesc& d);
     void UploadGammaRamp(uint32_t brightness, uint32_t contrast);
 
@@ -439,6 +452,11 @@ private:
     Assembled asm_;
 
     Resolved blit_vs_, blit_ps_;
+    // SMAA: edges, blend weights, the blended frame, each the frame's size; the area and search lookups
+    Resolved smaa_vs_[3], smaa_ps_[3];
+    vk::Image smaa_[3], smaa_area_, smaa_search_;
+    uint32_t smaa_w_ = 0, smaa_h_ = 0;
+    bool smaa_built_ = false, smaa_failed_ = false;
     VkSampler blit_linear_ = VK_NULL_HANDLE, blit_point_ = VK_NULL_HANDLE;
     vk::Image lut_;
     bool gamma_ = false;
@@ -1092,16 +1110,7 @@ bool VkBackend::Lookup(Resolved& r) {
 void VkBackend::CreateBlit() {
     Request(blit_vs_, kBlitHlsl, vk::Stage::Vertex, "vs");
     Request(blit_ps_, kBlitHlsl, vk::Stage::Pixel, "psmain");
-    // asked for on the build threads: the renderer waits for them here
-    for (Resolved* r : {&blit_vs_, &blit_ps_}) {
-        std::unique_lock lock(build_lock_);
-        build_cv_.wait(lock, [&] {
-            auto it = built_.find(r->hash);
-            return it == built_.end() || it->second.state != Built::kBuilding;
-        });
-        lock.unlock();
-        Lookup(*r);
-    }
+    Await({&blit_vs_, &blit_ps_});
     if (!blit_vs_.obj || !blit_ps_.obj) LOGE("vk: the present pass did not compile");
     SamplerDesc lin;
     lin.min = lin.mag = VK_FILTER_LINEAR;
@@ -1111,6 +1120,168 @@ void VkBackend::CreateBlit() {
     SamplerDesc pt = lin;
     pt.min = pt.mag = VK_FILTER_NEAREST;
     blit_point_ = Sampler(pt);
+}
+
+// asked for on the build threads: the renderer waits for them here
+void VkBackend::Await(std::initializer_list<Resolved*> shaders) {
+    for (Resolved* r : shaders) {
+        std::unique_lock lock(build_lock_);
+        build_cv_.wait(lock, [&] {
+            auto it = built_.find(r->hash);
+            return it == built_.end() || it->second.state != Built::kBuilding;
+        });
+        lock.unlock();
+        Lookup(*r);
+    }
+}
+
+void VkBackend::PostState(const VkViewport& vp, const VkRect2D& sc, const float constants[4]) {
+    VkCommandBuffer cmd = Cmd();
+    SetFixedState();
+    fn.vkCmdSetViewportWithCount(cmd, 1, &vp);
+    fn.vkCmdSetScissorWithCount(cmd, 1, &sc);
+    VkBool32 off = VK_FALSE;
+    VkColorBlendEquationEXT eq{VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE,
+                               VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD};
+    VkColorComponentFlags mask = 0xF;
+    fn.vkCmdSetColorBlendEnableEXT(cmd, 0, 1, &off);
+    fn.vkCmdSetColorBlendEquationEXT(cmd, 0, 1, &eq);
+    fn.vkCmdSetColorWriteMaskEXT(cmd, 0, 1, &mask);
+    fn.vkCmdSetBlendConstants(cmd, constants);
+    fn.vkCmdSetDepthTestEnable(cmd, VK_FALSE);
+    fn.vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
+    fn.vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_ALWAYS);
+    fn.vkCmdSetStencilTestEnable(cmd, VK_FALSE);
+    fn.vkCmdSetStencilOp(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP,
+                         VK_COMPARE_OP_ALWAYS);
+    fn.vkCmdSetStencilCompareMask(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+    fn.vkCmdSetStencilWriteMask(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+    fn.vkCmdSetStencilReference(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+    fn.vkCmdSetDepthBiasEnable(cmd, VK_FALSE);
+    fn.vkCmdSetDepthBias(cmd, 0, 0, 0);
+    fn.vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
+    fn.vkCmdSetFrontFace(cmd, VK_FRONT_FACE_CLOCKWISE);
+    fn.vkCmdSetPolygonModeEXT(cmd, VK_POLYGON_MODE_FILL);
+    fn.vkCmdSetPrimitiveTopology(cmd, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    fn.vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+}
+
+void VkBackend::DrawPost(const vk::Image& out, uint32_t w, uint32_t h, bool clear, const Resolved& vs,
+                         const Resolved& ps, const float* params, size_t bytes,
+                         std::initializer_list<VkImageView> views) {
+    Alloc cb = Upload(bytes, size_t(ubo_align_));
+    std::memcpy(cb.cpu, params, bytes);
+    Outside();  // the pass before written, for this one to read
+    VkRenderingAttachmentInfo colour{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    colour.imageView = out.attach;
+    colour.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    colour.loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colour.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = {{0, 0}, {w, h}};
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &colour;
+    VkCommandBuffer cmd = Cmd();
+    fn.vkCmdBeginRendering(cmd, &ri);
+    // D3D's clip space, as the present pass: the viewport upside down
+    const float zero[4] = {};
+    PostState({0, float(h), float(w), -float(h), 0.0f, 1.0f}, {{0, 0}, {w, h}}, zero);
+    BindShaders(vs.obj, ps.obj);
+    VkDescriptorBufferInfo ubo{cb.buffer, cb.off, bytes};
+    VkDescriptorImageInfo img[3];
+    size_t i = 0;
+    for (VkImageView v : views) img[i++] = {VK_NULL_HANDLE, v, VK_IMAGE_LAYOUT_GENERAL};
+    for (; i < 3; i++) img[i] = {VK_NULL_HANDLE, dummy_[kTex2D].view, VK_IMAGE_LAYOUT_GENERAL};
+    VkDescriptorImageInfo smp[2] = {{blit_linear_, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED},
+                                    {blit_point_, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED}};
+    VkWriteDescriptorSet wr[3] = {};
+    for (auto& x : wr) x.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    wr[0].dstBinding = vk::kBindingUbo + 1;
+    wr[0].descriptorCount = 1;
+    wr[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    wr[0].pBufferInfo = &ubo;
+    wr[1].dstBinding = vk::kBindingTexture;
+    wr[1].descriptorCount = 3;
+    wr[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    wr[1].pImageInfo = img;
+    wr[2].dstBinding = vk::kBindingSampler;
+    wr[2].descriptorCount = 2;
+    wr[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    wr[2].pImageInfo = smp;
+    fn.vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 3, wr);
+    fn.vkCmdDraw(cmd, 3, 1, 0, 0);
+    fn.vkCmdEndRendering(cmd);
+    pending_ = true;
+    // the draws after this set their state afresh
+    fixed_ = false;
+    vin_set_ = false;
+}
+
+// the shaders once, the first time SMAA is on (a moment's wait; kept in the shader cache after), the lookups once, the
+// targets at the frame's size
+bool VkBackend::EnsureSmaa(uint32_t w, uint32_t h) {
+    if (smaa_failed_) return false;
+    if (!smaa_built_) {
+        static const std::string hlsl = std::string(kSmaaConfig) + kSmaaHlsl + kSmaaPasses;
+        const char* vs[3] = {"vs_edges", "vs_weights", "vs_blend"};
+        const char* ps[3] = {"smaa_edges", "smaa_weights", "smaa_blend"};
+        for (int i = 0; i < 3; i++) {
+            Request(smaa_vs_[i], hlsl, vk::Stage::Vertex, vs[i]);
+            Request(smaa_ps_[i], hlsl, vk::Stage::Pixel, ps[i]);
+        }
+        Await({&smaa_vs_[0], &smaa_vs_[1], &smaa_vs_[2], &smaa_ps_[0], &smaa_ps_[1], &smaa_ps_[2]});
+        smaa_built_ = true;
+        for (int i = 0; i < 3; i++) smaa_failed_ |= !smaa_vs_[i].obj || !smaa_ps_[i].obj;
+        // smaa_textures.h: area 160 x 560 in two channels, search 64 x 16 in one
+        struct Table {
+            vk::Image& img;
+            VkFormat fmt;
+            uint32_t w, h, bpp;
+            const uint8_t* data;
+        } tables[2] = {{smaa_area_, VK_FORMAT_R8G8_UNORM, 160, 560, 2, kSmaaArea},
+                        {smaa_search_, VK_FORMAT_R8_UNORM, 64, 16, 1, kSmaaSearch}};
+        static_assert(sizeof(kSmaaArea) == 160 * 560 * 2 && sizeof(kSmaaSearch) == 64 * 16);
+        for (Table& l : tables) {
+            if (smaa_failed_ || !dev_.CreateImage(l.img, l.fmt, l.w, l.h, 1, 1, 1, 0)) {
+                smaa_failed_ = true;
+                break;
+            }
+            InitLayout(l.img);
+            Alloc a = Upload(size_t(l.w) * l.h * l.bpp, 16);
+            std::memcpy(a.cpu, l.data, size_t(l.w) * l.h * l.bpp);
+            Outside();
+            CopyToImage(l.img, a, 0, 0, l.w, l.h, 1, l.w);
+        }
+        if (smaa_failed_) {
+            LOGE("vk: SMAA could not be set up, it stays off");
+            return false;
+        }
+        LOGI("vk: SMAA ready");
+    }
+    if (smaa_w_ == w && smaa_h_ == h) return true;
+    const VkFormat fmt[3] = {VK_FORMAT_R8G8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, kColourFormat};
+    for (int i = 0; i < 3; i++) {
+        if (smaa_[i].image) Retire(smaa_[i]);
+        if (!dev_.CreateImage(smaa_[i], fmt[i], w, h, 1, 1, 1, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) {
+            smaa_w_ = smaa_h_ = 0;
+            return false;
+        }
+        InitLayout(smaa_[i]);
+    }
+    smaa_w_ = w;
+    smaa_h_ = h;
+    return true;
+}
+
+const vk::Image* VkBackend::Smaa(const Target& t) {
+    if (!EnsureSmaa(t.w, t.h)) return nullptr;
+    float p[4] = {1.0f / t.w, 1.0f / t.h, float(t.w), float(t.h)};
+    DrawPost(smaa_[0], t.w, t.h, true, smaa_vs_[0], smaa_ps_[0], p, sizeof(p), {t.img.view});
+    DrawPost(smaa_[1], t.w, t.h, true, smaa_vs_[1], smaa_ps_[1], p, sizeof(p),
+             {smaa_[0].view, smaa_area_.view, smaa_search_.view});
+    DrawPost(smaa_[2], t.w, t.h, false, smaa_vs_[2], smaa_ps_[2], p, sizeof(p), {t.img.view, smaa_[1].view});
+    return &smaa_[2];
 }
 
 void VkBackend::UploadGammaRamp(uint32_t brightness, uint32_t contrast) {
@@ -2123,6 +2294,11 @@ void VkBackend::Present(const Surface& front, bool pillarbox) {
     Target* t = EnsureTarget(front, false);
     if (t && LatchCpuWrite(*t)) UploadTarget(*t, front);
     if (t) SaveShot(*t);
+    // what is shown: the frame, or SMAA's blend of it, made before the swap chain image is asked for
+    VkImageView shown = t ? t->img.view : VK_NULL_HANDLE;
+    if (t && set.smaa) {
+        if (const vk::Image* aa = Smaa(*t)) shown = aa->view;
+    }
 
     // the uniforms first, then the swap chain image
     float c[20] = {0, 0, 1, 1, gamma_ ? 1.0f : 0.0f, 0, 1, 1};
@@ -2180,38 +2356,10 @@ void VkBackend::Present(const Surface& front, bool pillarbox) {
             if (pillarbox) vw = vh * 4.0f / 3.0f;
             float x = std::floor((w - vw) / 2), y = std::floor((h - vh) / 2);
             VkCommandBuffer cmd = Cmd();
-            SetFixedState();
-            VkViewport vp{x, y + vh, vw, -vh, 0.0f, 1.0f};
-            VkRect2D sc{{0, 0}, {dev_.swap_w, dev_.swap_h}};
-            fn.vkCmdSetViewportWithCount(cmd, 1, &vp);
-            fn.vkCmdSetScissorWithCount(cmd, 1, &sc);
-            VkBool32 off = VK_FALSE;
-            VkColorBlendEquationEXT eq{VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, VK_BLEND_FACTOR_ONE,
-                                       VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD};
-            VkColorComponentFlags mask = 0xF;
-            fn.vkCmdSetColorBlendEnableEXT(cmd, 0, 1, &off);
-            fn.vkCmdSetColorBlendEquationEXT(cmd, 0, 1, &eq);
-            fn.vkCmdSetColorWriteMaskEXT(cmd, 0, 1, &mask);
-            fn.vkCmdSetBlendConstants(cmd, c);
-            fn.vkCmdSetDepthTestEnable(cmd, VK_FALSE);
-            fn.vkCmdSetDepthWriteEnable(cmd, VK_FALSE);
-            fn.vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_ALWAYS);
-            fn.vkCmdSetStencilTestEnable(cmd, VK_FALSE);
-            fn.vkCmdSetStencilOp(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP,
-                                 VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS);
-            fn.vkCmdSetStencilCompareMask(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
-            fn.vkCmdSetStencilWriteMask(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
-            fn.vkCmdSetStencilReference(cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
-            fn.vkCmdSetDepthBiasEnable(cmd, VK_FALSE);
-            fn.vkCmdSetDepthBias(cmd, 0, 0, 0);
-            fn.vkCmdSetCullMode(cmd, VK_CULL_MODE_NONE);
-            fn.vkCmdSetFrontFace(cmd, VK_FRONT_FACE_CLOCKWISE);
-            fn.vkCmdSetPolygonModeEXT(cmd, VK_POLYGON_MODE_FILL);
-            fn.vkCmdSetPrimitiveTopology(cmd, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-            fn.vkCmdSetVertexInputEXT(cmd, 0, nullptr, 0, nullptr);
+            PostState({x, y + vh, vw, -vh, 0.0f, 1.0f}, {{0, 0}, {dev_.swap_w, dev_.swap_h}}, c);
             BindShaders(blit_vs_.obj, blit_ps_.obj);
             VkDescriptorBufferInfo ubo{cb.buffer, cb.off, sizeof(c)};
-            VkDescriptorImageInfo img[2] = {{VK_NULL_HANDLE, t->img.view, VK_IMAGE_LAYOUT_GENERAL},
+            VkDescriptorImageInfo img[2] = {{VK_NULL_HANDLE, shown, VK_IMAGE_LAYOUT_GENERAL},
                                             {VK_NULL_HANDLE, lut_.view, VK_IMAGE_LAYOUT_GENERAL}};
             VkDescriptorImageInfo smp[2] = {{blit_linear_, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED},
                                             {blit_point_, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED}};

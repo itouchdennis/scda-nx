@@ -1,7 +1,7 @@
 #pragma once
 
-// SMAA's reference shader (github.com/iryoku/smaa), licence below. d3d12.cpp puts the configuration before it
-// and the passes after.
+// SMAA's reference shader (github.com/iryoku/smaa), licence below, with what the renderers put around it: the
+// configuration before it and the passes after (d3d12.cpp, and the port's gpu_vk.cpp)
 
 namespace gpu {
 
@@ -1368,5 +1368,64 @@ void SMAASeparatePS(float4 position,
 //-----------------------------------------------------------------------------
 #endif // SMAA_INCLUDE_PS
 )smaa";
+
+// before kSmaaHlsl: its configuration, laid out as the renderers bind it (b1, t0 to t2, s0 linear, s1 point)
+inline constexpr char kSmaaConfig[] = R"(
+cbuffer P : register(b1) { float4 metrics; };
+#define SMAA_RT_METRICS metrics
+#define SMAA_CUSTOM_SL
+#define SMAA_THRESHOLD 0.05
+#define SMAA_MAX_SEARCH_STEPS 16
+#define SMAA_MAX_SEARCH_STEPS_DIAG 8
+#define SMAA_CORNER_ROUNDING 25
+SamplerState LinearSampler : register(s0);
+SamplerState PointSampler : register(s1);
+#define SMAATexture2D(tex) Texture2D tex
+#define SMAATexturePass2D(tex) tex
+#define SMAASampleLevelZero(tex, coord) tex.SampleLevel(LinearSampler, coord, 0)
+#define SMAASampleLevelZeroPoint(tex, coord) tex.SampleLevel(PointSampler, coord, 0)
+#define SMAASampleLevelZeroOffset(tex, coord, offset) tex.SampleLevel(LinearSampler, coord, 0, offset)
+#define SMAASample(tex, coord) tex.Sample(LinearSampler, coord)
+#define SMAASamplePoint(tex, coord) tex.Sample(PointSampler, coord)
+#define SMAASampleOffset(tex, coord, offset) tex.Sample(LinearSampler, coord, offset)
+#define SMAAGather(tex, coord) tex.Gather(LinearSampler, coord, 0)
+#define SMAA_FLATTEN [flatten]
+#define SMAA_BRANCH [branch]
+)";
+
+// after kSmaaHlsl: the full screen passes, edges from the frame's luma, blend weights from edges, area and search, then the frame blended
+inline constexpr char kSmaaPasses[] = R"(
+Texture2D tex0 : register(t0);
+Texture2D tex1 : register(t1);
+Texture2D tex2 : register(t2);
+struct SmaaEdgeV { float4 p : SV_Position; float2 uv : TEXCOORD0; float4 o[3] : TEXCOORD1; };
+struct SmaaWeightV { float4 p : SV_Position; float2 uv : TEXCOORD0; float2 pix : TEXCOORD1; float4 o[3] : TEXCOORD2; };
+struct SmaaBlendV { float4 p : SV_Position; float2 uv : TEXCOORD0; float4 o : TEXCOORD1; };
+float4 corner(uint id, out float2 uv) {
+    uv = float2((id << 1) & 2, id & 2);
+    return float4(uv * float2(2, -2) + float2(-1, 1), 0, 1);
+}
+SmaaEdgeV vs_edges(uint id : SV_VertexID) {
+    SmaaEdgeV o;
+    o.p = corner(id, o.uv);
+    SMAAEdgeDetectionVS(o.uv, o.o);
+    return o;
+}
+SmaaWeightV vs_weights(uint id : SV_VertexID) {
+    SmaaWeightV o;
+    o.p = corner(id, o.uv);
+    SMAABlendingWeightCalculationVS(o.uv, o.pix, o.o);
+    return o;
+}
+SmaaBlendV vs_blend(uint id : SV_VertexID) {
+    SmaaBlendV o;
+    o.p = corner(id, o.uv);
+    SMAANeighborhoodBlendingVS(o.uv, o.o);
+    return o;
+}
+float4 smaa_edges(SmaaEdgeV i) : SV_Target { return float4(SMAALumaEdgeDetectionPS(i.uv, i.o, tex0), 0, 0); }
+float4 smaa_weights(SmaaWeightV i) : SV_Target { return SMAABlendingWeightCalculationPS(i.uv, i.pix, i.o, tex0, tex1, tex2, 0); }
+float4 smaa_blend(SmaaBlendV i) : SV_Target { return SMAANeighborhoodBlendingPS(i.uv, i.o, tex0, tex1); }
+)";
 
 }  // namespace gpu
