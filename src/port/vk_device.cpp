@@ -88,6 +88,15 @@ bool Device::Init() {
     if (!PickDevice() || !CreateDevice()) return false;
     fn.vkGetDeviceQueue(dev, family, 0, &queue);
     fn.vkGetPhysicalDeviceMemoryProperties(phys, &mem_props_);
+    for (uint32_t t = 0; t < mem_props_.memoryTypeCount; t++) {
+        const VkMemoryType& mt = mem_props_.memoryTypes[t];
+        VkMemoryPropertyFlags f = mt.propertyFlags;
+        LOGI("vk: memory type %u: heap %u (%llu MB)%s%s%s%s", t, mt.heapIndex,
+             (unsigned long long)(mem_props_.memoryHeaps[mt.heapIndex].size >> 20),
+             f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT ? " device" : "", f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ? " host" : "",
+             f & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ? " coherent" : "",
+             f & VK_MEMORY_PROPERTY_HOST_CACHED_BIT ? " cached" : "");
+    }
     // the depth buffer: 24 bit as on the console where it can be sampled
     VkFormatProperties fp{};
     fn.vkGetPhysicalDeviceFormatProperties(phys, VK_FORMAT_D24_UNORM_S8_UINT, &fp);
@@ -335,6 +344,9 @@ Memory Device::Allocate(const VkMemoryRequirements& req, VkMemoryPropertyFlags w
             if ((pass == 0) == !(f & avoid)) types.push_back(t);
         }
     }
+    // no type with these properties is no shortage: CreateBuffer asks for host cached memory, which not every GPU has,
+    // and then takes plain host memory
+    if (types.empty()) return {};
     VkDeviceSize align = std::max<VkDeviceSize>(req.alignment, 16);
     for (uint32_t type : types) {
         for (uint32_t b = 0; b < blocks_.size(); b++) {

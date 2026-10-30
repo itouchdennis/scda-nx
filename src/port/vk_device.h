@@ -73,6 +73,7 @@ namespace gpu::vk {
     X(vkCmdCopyBufferToImage)                                                                                         \
     X(vkCmdCopyImageToBuffer)                                                                                         \
     X(vkCmdCopyImage)                                                                                                 \
+    X(vkCmdBlitImage)                                                                                                 \
     X(vkCmdClearColorImage)                                                                                           \
     X(vkCmdClearDepthStencilImage)                                                                                    \
     X(vkCmdClearAttachments)                                                                                          \

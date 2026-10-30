@@ -12,8 +12,10 @@
 // The viewport's height is negative: D3D's clip space and its windings as they are, row 0 of every target the top.
 // All images stay in the GENERAL layout; render passes, copies and uploads are ordered by a barrier between them.
 //
-// SMAA over the shown frame as d3d12.cpp's (smaa_shader.h). Not here yet, as with OpenGL: render scale, MSAA, shader
-// model 3 HDR and soft shadows, ambient occlusion, the texture pack, captures, the settings panel.
+// SMAA over the shown frame as d3d12.cpp's (smaa_shader.h). Render scale as d3d12.cpp's: every target but the shadow
+// map is drawn at app::RenderScale, and what reads or writes guest memory goes through a copy at the console's size.
+// Not here yet, as with OpenGL: MSAA, shader model 3 HDR and soft shadows, ambient occlusion, the shadow resolution,
+// the texture pack, captures, the settings panel.
 #include <SDL.h>
 #include <dxgiformat.h>
 #include <pthread.h>
@@ -316,6 +318,10 @@ private:
                      uint32_t d, uint32_t row_texels);
     vk::Buffer& Readback(VkDeviceSize bytes);
     bool ReadTarget(Target& t, std::vector<uint8_t>& px);
+    vk::Image* Scratch(uint32_t w, uint32_t h);
+    vk::Image* GuestSized(Target& t);
+    void Blit(const vk::Image& src, uint32_t sw, uint32_t sh, const vk::Image& dst, uint32_t dw, uint32_t dh);
+    void ApplyRenderScale(const Surface& front);
 
     // shaders
     VkShaderEXT MakeShader(vk::Stage stage, const char* entry, const void* code, size_t size, bool binary);
@@ -394,6 +400,8 @@ private:
     uint64_t segment_serial_[kSegments] = {};
     VkDeviceSize ubo_align_ = 256;
     vk::Buffer readback_;
+    float scale_ = 1.0f;  // targets' host size over the console's
+    std::unordered_map<uint64_t, vk::Image> scratch_;  // by width << 32 | height: targets at the console's size
 
     // the open render pass, and what the next draw wants
     bool rendering_ = false;
@@ -473,6 +481,10 @@ private:
     // NOOVERWRITE locks: each surface copied into a ring of host buffers, the newest the GPU has finished handed to
     // the title without waiting (gpu/d3d12.cpp does the same)
     static constexpr int kLateSlots = 3;
+    // a surface locked within this many presents gets a copy every present, so the next lock finds one finished even
+    // when the locks come seconds apart; only small ones, a whole frame each present would cost
+    static constexpr uint64_t kLateKeep = 1800;
+    static constexpr VkDeviceSize kLateKeepBytes = 256u << 10;
     struct Late {
         vk::Buffer buf[kLateSlots];
         uint64_t serial[kLateSlots] = {};  // set while the GPU still writes the slot
@@ -480,11 +492,13 @@ private:
         uint64_t seq[kLateSlots] = {};
         uint64_t frame[kLateSlots] = {};
         uint64_t delivered = 0;
+        uint64_t locked = 0;  // presents_ at the last lock
         uint32_t gw = 0, gh = 0;
         uint32_t next = 0;
     };
     void ResetLate(Late& l);
     void PollLate(Late& l);
+    void CopyLate(Late& l, Target& t);
     std::unordered_map<uint32_t, Late> late_;
     std::mutex late_lock_;  // DeliverLate runs on the title's thread
     uint64_t late_seq_ = 0;
@@ -814,16 +828,18 @@ vk::Buffer& VkBackend::Readback(VkDeviceSize bytes) {
     return readback_;
 }
 
-// a colour target's pixels now, rows of w * 4 bytes as guest memory has them; waits for the GPU
+// a colour target's pixels now at the console's size, rows of gw * 4 bytes as guest memory has them; waits for the GPU
 bool VkBackend::ReadTarget(Target& t, std::vector<uint8_t>& px) {
-    VkDeviceSize bytes = VkDeviceSize(t.w) * t.h * 4;
+    VkDeviceSize bytes = VkDeviceSize(t.gw) * t.gh * 4;
     vk::Buffer& rb = Readback(bytes);
     if (!rb.buffer || !rb.mem.map) return false;
+    vk::Image* src = GuestSized(t);
+    if (!src) return false;
     Outside();
     VkBufferImageCopy r{};
     r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    r.imageExtent = {t.w, t.h, 1};
-    fn.vkCmdCopyImageToBuffer(Cmd(), t.img.image, VK_IMAGE_LAYOUT_GENERAL, rb.buffer, 1, &r);
+    r.imageExtent = {t.gw, t.gh, 1};
+    fn.vkCmdCopyImageToBuffer(Cmd(), src->image, VK_IMAGE_LAYOUT_GENERAL, rb.buffer, 1, &r);
     VkMemoryBarrier host{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
     host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
@@ -832,6 +848,49 @@ bool VkBackend::ReadTarget(Target& t, std::vector<uint8_t>& px) {
     WaitSerial(Submit());
     px.assign(rb.mem.map, rb.mem.map + bytes);
     return true;
+}
+
+// an image of this size for a target at the console's size, kept for the next one
+vk::Image* VkBackend::Scratch(uint32_t w, uint32_t h) {
+    vk::Image& img = scratch_[uint64_t(w) << 32 | h];
+    if (!img.image) {
+        if (!dev_.CreateImage(img, kColourFormat, w, h, 1, 1, 1, 0)) return nullptr;
+        InitLayout(img);
+    }
+    return &img;
+}
+
+// a colour target at the console's size: itself when it is drawn at that size, else shrunk into a scratch image
+vk::Image* VkBackend::GuestSized(Target& t) {
+    if (t.w == t.gw && t.h == t.gh) return &t.img;
+    vk::Image* img = Scratch(t.gw, t.gh);
+    if (img) Blit(t.img, t.w, t.h, *img, t.gw, t.gh);
+    return img;
+}
+
+// all of src stretched over all of dst, filtered
+void VkBackend::Blit(const vk::Image& src, uint32_t sw, uint32_t sh, const vk::Image& dst, uint32_t dw, uint32_t dh) {
+    Outside();
+    VkImageBlit b{};
+    b.srcSubresource = b.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    b.srcOffsets[1] = {int32_t(sw), int32_t(sh), 1};
+    b.dstOffsets[1] = {int32_t(dw), int32_t(dh), 1};
+    fn.vkCmdBlitImage(Cmd(), src.image, VK_IMAGE_LAYOUT_GENERAL, dst.image, VK_IMAGE_LAYOUT_GENERAL, 1, &b,
+                      VK_FILTER_LINEAR);
+    pending_ = true;
+}
+
+// a new render scale makes every target again at it, as d3d12.cpp's ApplySettings; the front buffer's height is the
+// console's screen
+void VkBackend::ApplyRenderScale(const Surface& front) {
+    uint32_t gw, gh;
+    SurfaceSize(front, gw, gh);
+    float want = app::RenderScale(gh);
+    if (std::fabs(want - scale_) <= 1e-4f) return;
+    while (!targets_.empty()) ReleaseTarget(targets_.begin());
+    scale_ = want;
+    LOGI("vk: render scale %.3f, %ux%u for the %ux%u screen", scale_, uint32_t(std::lround(gw * scale_)),
+         uint32_t(std::lround(gh * scale_)), gw, gh);
 }
 
 // shaders
@@ -1372,8 +1431,12 @@ Target* VkBackend::EnsureTarget(const Surface& s, bool depth) {
     }
     Target t;
     t.depth = depth;
-    t.gw = t.w = std::max(gw, 1u);
-    t.gh = t.h = std::max(gh, 1u);
+    t.gw = std::max(gw, 1u);
+    t.gh = std::max(gh, 1u);
+    // the shadow map stays the console's 512 x 512, as d3d12.cpp's at the default shadow resolution
+    float sc = depth && g_shadow.blur_hi && s.data == g_shadow.map ? 1.0f : scale_;
+    t.w = std::max(1u, uint32_t(std::lround(float(t.gw) * sc)));
+    t.h = std::max(1u, uint32_t(std::lround(float(t.gh) * sc)));
     VkImageUsageFlags use = depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     if (!dev_.CreateImage(t.img, depth ? dev_.depth_format : kColourFormat, t.w, t.h, 1, 1, 1, use)) return nullptr;
     t.data = data;
@@ -1408,18 +1471,22 @@ bool VkBackend::BindTargets(const State& s) {
     return true;
 }
 
-// CPU pixels of a colour surface into its host target; the target is the console's size, so all of them
+// CPU pixels of a colour surface into its host target, stretched up through a scratch image when that is scaled
 void VkBackend::UploadTarget(Target& t, const Surface& s) {
     TextureDesc d;
     if (!Describe(s.header, d) || Format(d.format).depth || Format(d.format).host != Host::BGRA8) return;
     std::vector<uint8_t> px;
     uint32_t pitch;
     DecodeLevel(d, 0, 0, static_cast<const uint8_t*>(kernel::HostPtr(d.data)), nullptr, px, pitch);
-    uint32_t w = std::min(d.width, t.w), h = std::min(d.height, t.h);
+    uint32_t w = std::min(d.width, t.gw), h = std::min(d.height, t.gh);
+    bool scaled = t.w != t.gw || t.h != t.gh;
+    vk::Image* into = scaled ? Scratch(t.gw, t.gh) : &t.img;
+    if (!into) return;
     Alloc a = Upload(size_t(pitch) * h, 16);
     if (a.cpu) std::memcpy(a.cpu, px.data(), std::min(px.size(), size_t(pitch) * h));
     Outside();
-    CopyToImage(t.img, a, 0, 0, w, h, 1, pitch / 4);
+    CopyToImage(*into, a, 0, 0, w, h, 1, pitch / 4);
+    if (scaled) Blit(*into, t.gw, t.gh, t.img, t.w, t.h);
     if (!t.read.empty() && d.width == t.gw && d.height == t.gh && pitch == t.gw * 4) t.read = px;
     t.epoch = DirtyEpoch(t.data);
     t.sig = MemSig(t.data, t.bytes);
@@ -2049,16 +2116,20 @@ void VkBackend::Copy(const Surface& src, const Surface& dst, uint32_t count, uin
     if (!dst_t || src_t == dst_t) return;
     bool listed = count && src_rects;
     uint32_t n = listed ? count : 1;
-    std::vector<VkImageCopy> regions;
+    // the rects are the console's pixels: each target's own scale takes them to its host image
+    auto host = [](int v, uint32_t size, uint32_t guest) { return int32_t(int64_t(v) * size / guest); };
+    bool same = uint64_t(src_t->w) * dst_t->gw == uint64_t(dst_t->w) * src_t->gw &&
+                uint64_t(src_t->h) * dst_t->gh == uint64_t(dst_t->h) * src_t->gh;
+    std::vector<VkImageBlit> regions;
     for (uint32_t i = 0; i < n; i++) {
-        int x0 = 0, y0 = 0, x1 = int(std::min(src_t->w, dst_t->w)), y1 = int(std::min(src_t->h, dst_t->h));
+        int x0 = 0, y0 = 0, x1 = int(std::min(src_t->gw, dst_t->gw)), y1 = int(std::min(src_t->gh, dst_t->gh));
         int dx = 0, dy = 0;
         if (listed) {
             GuestRect r = ReadGuestRect(src_rects, i);
             x0 = std::max(r.left, 0);
             y0 = std::max(r.top, 0);
-            x1 = std::min(r.right, int(src_t->w));
-            y1 = std::min(r.bottom, int(src_t->h));
+            x1 = std::min(r.right, int(src_t->gw));
+            y1 = std::min(r.bottom, int(src_t->gh));
             dx = x0;
             dy = y0;
             if (dst_points) {
@@ -2066,20 +2137,22 @@ void VkBackend::Copy(const Surface& src, const Surface& dst, uint32_t count, uin
                 dy = int32_t(kernel::R32(dst_points + i * 8 + 4));
             }
         }
-        if (x1 <= x0 || y1 <= y0 || dx < 0 || dy < 0 || dx >= int(dst_t->w) || dy >= int(dst_t->h)) continue;
-        x1 = std::min(x1, x0 + int(dst_t->w) - dx);
-        y1 = std::min(y1, y0 + int(dst_t->h) - dy);
-        VkImageCopy r{};
+        if (x1 <= x0 || y1 <= y0 || dx < 0 || dy < 0 || dx >= int(dst_t->gw) || dy >= int(dst_t->gh)) continue;
+        x1 = std::min(x1, x0 + int(dst_t->gw) - dx);
+        y1 = std::min(y1, y0 + int(dst_t->gh) - dy);
+        VkImageBlit r{};
         r.srcSubresource = r.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        r.srcOffset = {x0, y0, 0};
-        r.dstOffset = {dx, dy, 0};
-        r.extent = {uint32_t(x1 - x0), uint32_t(y1 - y0), 1};
+        r.srcOffsets[0] = {host(x0, src_t->w, src_t->gw), host(y0, src_t->h, src_t->gh), 0};
+        r.srcOffsets[1] = {host(x1, src_t->w, src_t->gw), host(y1, src_t->h, src_t->gh), 1};
+        r.dstOffsets[0] = {host(dx, dst_t->w, dst_t->gw), host(dy, dst_t->h, dst_t->gh), 0};
+        r.dstOffsets[1] = {host(dx + x1 - x0, dst_t->w, dst_t->gw), host(dy + y1 - y0, dst_t->h, dst_t->gh), 1};
         regions.push_back(r);
     }
     if (!regions.empty()) {
         Outside();
-        fn.vkCmdCopyImage(Cmd(), src_t->img.image, VK_IMAGE_LAYOUT_GENERAL, dst_t->img.image, VK_IMAGE_LAYOUT_GENERAL,
-                          uint32_t(regions.size()), regions.data());
+        // at one scale a blit unfiltered is the copy it was; between scales it stretches
+        fn.vkCmdBlitImage(Cmd(), src_t->img.image, VK_IMAGE_LAYOUT_GENERAL, dst_t->img.image, VK_IMAGE_LAYOUT_GENERAL,
+                          uint32_t(regions.size()), regions.data(), same ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
         pending_ = true;
     }
     dst_t->drawn = true;
@@ -2096,7 +2169,7 @@ void VkBackend::Sync(uint32_t data, uint32_t) {
     // color targets are 32 bit linear in guest memory, the pitch rounds to 64 bytes
     uint32_t pitch = GuestPitch(t.gw);
     uint8_t* guest = static_cast<uint8_t*>(kernel::HostPtr(data));
-    for (uint32_t y = 0; y < t.gh; y++) std::memcpy(guest + size_t(y) * pitch, &px[size_t(y) * t.w * 4], t.gw * 4);
+    for (uint32_t y = 0; y < t.gh; y++) std::memcpy(guest + size_t(y) * pitch, &px[size_t(y) * t.gw * 4], t.gw * 4);
     t.read = std::move(px);
     t.drawn = false;
     t.sig = MemSig(t.data, t.bytes);
@@ -2154,9 +2227,14 @@ void VkBackend::RecordLate(uint32_t data) {
         l.gw = t.gw;
         l.gh = t.gh;
     }
+    l.locked = presents_;
     Poll();
     PollLate(l);
-    // a copy for a later lock, unless the GPU is a whole ring behind
+    CopyLate(l, t);
+}
+
+// a copy for a later lock, unless the GPU is a whole ring behind
+void VkBackend::CopyLate(Late& l, Target& t) {
     uint32_t slot = l.next;
     if (l.serial[slot]) return;
     VkDeviceSize bytes = VkDeviceSize(t.gw) * t.gh * 4;
@@ -2165,11 +2243,13 @@ void VkBackend::RecordLate(uint32_t data) {
         LOGE("vk: no read-back buffer");
         return;
     }
+    vk::Image* src = GuestSized(t);
+    if (!src) return;
     Outside();
     VkBufferImageCopy r{};
     r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     r.imageExtent = {t.gw, t.gh, 1};
-    fn.vkCmdCopyImageToBuffer(Cmd(), t.img.image, VK_IMAGE_LAYOUT_GENERAL, l.buf[slot].buffer, 1, &r);
+    fn.vkCmdCopyImageToBuffer(Cmd(), src->image, VK_IMAGE_LAYOUT_GENERAL, l.buf[slot].buffer, 1, &r);
     VkMemoryBarrier host{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
     host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
@@ -2245,7 +2325,7 @@ void VkBackend::SaveShot(Target& t) {
     char name[48];
     std::snprintf(name, sizeof(name), "frame_%06llu.ppm", (unsigned long long)presents_);
     if (FILE* f = std::fopen((dir / name).string().c_str(), "wb")) {
-        std::fprintf(f, "P6\n%u %u\n255\n", t.w, t.h);
+        std::fprintf(f, "P6\n%u %u\n255\n", t.gw, t.gh);
         for (size_t i = 0; i < px.size(); i += 4) {
             uint8_t rgb[3] = {px[i + 2], px[i + 1], px[i]};
             std::fwrite(rgb, 1, 3, f);
@@ -2291,6 +2371,15 @@ void VkBackend::Present(const Surface& front, bool pillarbox) {
         Swapchain();
     }
     if ((set.brightness << 8 | set.contrast) != ramp_set_) UploadGammaRamp(set.brightness, set.contrast);
+    ApplyRenderScale(front);
+    {
+        std::lock_guard lock(late_lock_);
+        for (auto& [data, l] : late_) {
+            if (presents_ - l.locked > kLateKeep || VkDeviceSize(l.gw) * l.gh * 4 > kLateKeepBytes) continue;
+            auto it = targets_.find(TargetKey(data, false));
+            if (it != targets_.end() && it->second.gw == l.gw && it->second.gh == l.gh) CopyLate(l, it->second);
+        }
+    }
     Target* t = EnsureTarget(front, false);
     if (t && LatchCpuWrite(*t)) UploadTarget(*t, front);
     if (t) SaveShot(*t);
