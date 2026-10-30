@@ -134,7 +134,7 @@ else
 fi
 
 # --- 5. the NRO -------------------------------------------------------------------------------------------------------
-step "Building the NRO (the first time takes 30 to 90 minutes)"
+step "Building the NRO (the first time can take a while, depending on your PC)"
 SCDA_GEN_DIR="$GEN" SCDA_NVK_SDK="$NVK" SD_ROOT="$OUT" BUILD_DIR="$CACHE/build-switch-vk" "$REPO/switch/build.sh"
 [ -f "$DEST/scda.nro" ] || fail "no NRO was made"
 

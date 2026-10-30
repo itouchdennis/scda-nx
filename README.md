@@ -32,13 +32,20 @@ Please do not upload or ask for built NROs.
 devkitPro, builds the Switch's Vulkan driver once, extracts your disc image, recompiles the game from it and leaves a
 folder ready for the SD card. Nothing of the game is downloaded or uploaded; everything is made on your computer from
 your own copy, and kept in `~/.cache/scda-nx` for the next run.
+
+> [!CAUTION]
+> **Only use this script if you are feeling lazy.** It runs `sudo`, edits `/etc/pacman.conf` and downloads and builds
+> code from the internet. Never blindly trust a script from the internet, this one included. If you are even a little
+> skeptical (and being skeptical is a good thing these days), read [build-nro.sh](build-nro.sh) first, or skip it
+> and run the steps from [Building for the Nintendo Switch by hand](#building-for-the-nintendo-switch-by-hand-arch-linux)
+> one by one, so you see and approve everything that happens.
 ```sh
 git clone https://github.com/itouchdennis/scda-nx.git
 cd scda-nx
 ./build-nro.sh "/path/to/your Splinter Cell Double Agent.iso"
 ```
-The extracted disc's folder (with `default.xbe`) works as well as an `.iso`. The first run takes one to three hours
-(the Vulkan driver and the whole game are compiled), later runs only rebuild what changed. When it is done, copy
+The extracted disc's folder (with `default.xbe`) works as well as an `.iso`. The first run can take a while, depending on your
+PC (the Vulkan driver and the whole game are compiled); later runs only rebuild what changed. When it is done, copy
 `out/switch` onto the root of your SD card and start the game from the Homebrew Menu with title takeover (hold R while
 starting any game). For an icon in the Homebrew Menu, put a 256x256 JPEG at `switch/icon.jpg` before building.
 
