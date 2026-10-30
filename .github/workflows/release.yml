@@ -1,0 +1,31 @@
+# Makes the GitHub release for a pushed tag (v*): the notes are the tag's section of CHANGELOG.md followed by
+# docs/HOW_TO_BUILD.md, and the build scripts are attached. Never an NRO: a release holds no game data and no code made
+# from the game, the check below refuses anything else.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Notes and files
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          awk -v t="## $tag" '$0==t{on=1;next} /^## v/{on=0} on' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "CHANGELOG.md has no section '## $tag'"; exit 1; }
+          { echo "## What's new"; cat notes.md; echo; echo "---"; echo; sed '1s/^# /## /' docs/HOW_TO_BUILD.md; } > body.md
+          mkdir dist
+          cp build-nro-windows.bat build-nro-docker.sh docs/HOW_TO_BUILD.md dist/
+          ls dist | grep -viE '^(build-nro-windows\.bat|build-nro-docker\.sh|HOW_TO_BUILD\.md)$' && exit 1 || true
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: scda-nx ${{ github.ref_name }}
+          body_path: body.md
+          files: dist/*

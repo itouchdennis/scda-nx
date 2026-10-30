@@ -27,29 +27,48 @@ There are no prebuilt `.nro` files, and there will not be any. A built NRO holds
 from the XBE, so sharing one would mean sharing the game. Everyone builds their own from their own copy, as below.
 Please do not upload or ask for built NROs.
 
-## The easiest way: Docker (any Linux)
-`build-nro-docker.sh` builds the NRO inside a ready-made builder container, so this computer needs nothing but
-[Docker](https://docs.docker.com/engine/install/): no toolchain, no packages, no `sudo`, no changes to your system.
-The container image (`ghcr.io/itouchdennis/scda-nx-builder`, made from [docker/Dockerfile](docker/Dockerfile) by
-[GitHub Actions](.github/workflows/builder-image.yml)) holds the Switch toolchain, the Vulkan driver and this
-repository's sources, and nothing of the game. Your game is mounted into it read only, and the NRO is made on your
-computer from your own copy.
-```sh
-git clone https://github.com/itouchdennis/scda-nx.git
-cd scda-nx
-./build-nro-docker.sh "/path/to/your Splinter Cell Double Agent.iso"
-```
-The extracted disc's folder (with `default.xbe`) works as well as an `.iso`. When it is done, copy `out/switch` onto
-the root of your SD card and start the game from the Homebrew Menu with title takeover (hold R while starting any
-game). The recompiled code and the build stay in the Docker volume `scda-nx-cache`, so later runs are quicker
-(`docker volume rm scda-nx-cache` removes it). For an icon in the Homebrew Menu, put a 256x256 JPEG at
-`switch/icon.jpg` before building.
+## How to build it: Windows and Linux in a few clicks
+Both ways run the build inside a ready-made builder container, so your computer needs nothing but Docker: no
+toolchain, no packages and no changes to your system. The container image (`ghcr.io/itouchdennis/scda-nx-builder`,
+made from [docker/Dockerfile](docker/Dockerfile) by [GitHub Actions](.github/workflows/builder-image.yml)) holds the
+Switch toolchain, the Vulkan driver and this repository's sources, and nothing of the game. Your game is mounted into
+it read only, and the NRO is made on your computer from your own copy. The scripts are attached to every
+[release](https://github.com/itouchdennis/scda-nx/releases), so you do not need git or the whole repository.
+
+You need your game as an `.iso` or the extracted disc (the folder with `default.xbe`), about 20 GB of free disk space,
+and patience for the first build (about 20 minutes to over an hour). Later builds are much quicker. Step by step, with
+everything that can come up: [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md).
+
+### Windows (10 or 11)
+1. Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) and start it once.
+2. Download [build-nro-windows.bat](build-nro-windows.bat) from the latest release and put it in a folder of its own.
+3. Double-click it and choose your game's `.iso` (or drag the `.iso` or the extracted disc's folder onto it). If
+   Windows warns about the file, click **More info**, then **Run anyway**.
+4. When it is done, a window opens with the folder `switch`: copy it onto the root of your SD card.
+
+### Linux
+1. Install [Docker](https://docs.docker.com/engine/install/), run `sudo usermod -aG docker $USER`, then log out and in.
+2. Download [build-nro-docker.sh](build-nro-docker.sh) from the latest release (or clone this repository) and run it:
+   ```sh
+   chmod +x build-nro-docker.sh
+   ./build-nro-docker.sh "/path/to/your Splinter Cell Double Agent.iso"
+   ```
+3. When it is done, copy `out/switch` (beside the script) onto the root of your SD card.
+
+### Then on the Switch
+Start the Homebrew Menu with title takeover (hold **R** while you start any game) and start Splinter Cell: Double
+Agent from it. The first time, things can be missing for a moment while the shaders are built.
+
+For an icon in the Homebrew Menu, put a 256x256 JPEG named `icon.jpg` beside the script before building. To run
+again for updates, just run the script again. The build cache stays in the Docker volume `scda-nx-cache`
+(`docker volume rm scda-nx-cache` removes it). macOS may work with Docker Desktop too, but it has not been tested.
 
 > [!CAUTION]
-> The same goes here as for every script: read [build-nro-docker.sh](build-nro-docker.sh),
-> [docker/entrypoint.sh](docker/entrypoint.sh) and [docker/Dockerfile](docker/Dockerfile) before you run them if
-> you are the least bit skeptical. If you would rather not trust a prebuilt image either, build it yourself from the
-> Dockerfile: `SCDA_LOCAL=1 ./build-nro-docker.sh ...` (this takes a while, it compiles the Vulkan driver).
+> The same goes here as for every script: read [build-nro-windows.bat](build-nro-windows.bat) or
+> [build-nro-docker.sh](build-nro-docker.sh), and [docker/entrypoint.sh](docker/entrypoint.sh) and
+> [docker/Dockerfile](docker/Dockerfile), before you run them if you are the least bit skeptical. If you would rather
+> not trust a prebuilt image either, build it yourself from the Dockerfile on Linux:
+> `SCDA_LOCAL=1 ./build-nro-docker.sh ...` (this takes a while, it compiles the Vulkan driver).
 
 ## The easy way without Docker: one command (Arch Linux)
 `build-nro.sh` does every step below by itself: it installs what is missing (asking for your password), sets up
@@ -145,6 +164,9 @@ Logging is off by default. To write the full log (and `boot.txt`) to `sdmc:/swit
 for example, add `logging = true` to `sdmc:/switch/scda/scda.toml`. A crash still writes `crash.txt` either way.
 
 What it took and the traps found on the way are in [PORTING_GUIDE.md](PORTING_GUIDE.md).
+
+## Changes
+What changed in each release: [CHANGELOG.md](CHANGELOG.md).
 
 ## Credits
 The recompilation, the Xbox kernel and XDK reimplementation, the renderer and all of the PC features are the work of

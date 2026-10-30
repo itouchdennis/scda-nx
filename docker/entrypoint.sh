@@ -23,7 +23,8 @@ step "Game files -> $GAME"
 mkdir -p "$GAME"
 if [ -d /game ]; then
     [ -f /game/default.xbe ] || fail "the folder you chose has no default.xbe: choose the extracted disc's folder"
-    rsync -a --info=progress2 --size-only --exclude '*.iso' /game/ "$GAME/"
+    # sizes only, no owners or permissions: /out can be a Windows folder (Docker Desktop), which takes neither
+    rsync -r --info=progress2 --size-only --exclude '*.iso' /game/ "$GAME/"
 elif [ -f "$GAME/default.xbe" ] && [ "$GAME/default.xbe" -nt /game ]; then
     echo "already extracted"
 else
