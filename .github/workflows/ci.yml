@@ -1,5 +1,6 @@
 # Checks every push and pull request without the game: no game data and no code made from the game ever passes through
 # here, so nothing is linked and no NRO is made. What it checks:
+#   commits   every commit's first line in Conventional Commits form (CONTRIBUTING.md)
 #   scripts   the shell scripts' syntax and shellcheck's warnings, the Windows script's PowerShell and line endings
 #   linux     the Linux port compiles with each renderer (vk, gl, null), and the recompiler builds
 #   switch    the Switch port compiles in the builder image (devkitPro, NVK), and the builder refuses what is not the game
@@ -22,6 +23,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Conventional commit messages
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+              tools/ci/check-commits.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+          else
+              tools/ci/check-commits.sh "${{ github.event.before }}" "${{ github.sha }}"
+          fi
+
   scripts:
     runs-on: ubuntu-latest
     steps:

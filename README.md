@@ -173,7 +173,8 @@ for example, add `logging = true` to `sdmc:/switch/scda/scda.toml`. A crash stil
 What it took and the traps found on the way are in [PORTING_GUIDE.md](PORTING_GUIDE.md).
 
 ## Changes
-What changed in each release: [CHANGELOG.md](CHANGELOG.md).
+What changed in each release: [CHANGELOG.md](CHANGELOG.md). How to contribute, and the commit message format
+(Conventional Commits): [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 The recompilation, the Xbox kernel and XDK reimplementation, the renderer and all of the PC features are the work of
