@@ -2,6 +2,22 @@
 There are no prebuilt NROs in any release: each release holds the source and the build scripts. You build the NRO
 yourself, from your own copy of the game ([docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md)).
 
+## v0.4.5
+- **Gyro aiming on the Switch:** the Joy-Con (handheld or as a pair) and the Pro Controller turn the view by their
+  motion sensors. Off by default: Recomp Settings > Controller > Gyro > Gyro Aiming. *Gyro only while aiming* (on by
+  default) lets it turn the view only with the weapon raised or through the sniper scope, the camera stays on the
+  right stick otherwise. Sensitivity, axis and calibration as on Windows.
+- **Switch button layout:** *Use Switch button layout for A/B* and *... for X/Y* (Recomp Settings > General, both on
+  by default) make the face buttons work by their labels: A confirms and B goes back, in the game and every menu.
+- **Changing between 720p and 1080p works:** it flickered wildly without changing size, the swap chain being rebuilt
+  every frame at the window's old size.
+- **Versus is gone from the main menu on the Switch:** it is another program, with no NRO on the Switch.
+- **Settings that did nothing on the Switch are gone:** MSAA, shader model 3.0 with HDR rendering and tone mapping,
+  the soft shadow filter, ambient occlusion, HDR output, display mode and monitor (the Switch is always full
+  screen), the mouse and keyboard page, and the gyro button rows (they name buttons its controllers have not). They
+  stay on Windows, where its renderer draws them.
+- CI runs on `main` and on pull requests into it only; work goes on in `dev`.
+
 ## v0.4.1
 - **The shadow calibration in the game's settings works.** The slider sets the game's gamma ramp, which the port
   dropped so far; it is now applied to every frame, as on the Xbox, before the port's own brightness and contrast

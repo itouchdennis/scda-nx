@@ -63,6 +63,8 @@ are saved on the SD card and load at once from then on.
   replaces is kept in `out/BAK/`, named after its version (`scda_v0.4.1.nro`).
 - **Disk space:** the builder and the build cache live in Docker. To remove them:
   `docker volume rm scda-nx-cache` and `docker image rm ghcr.io/itouchdennis/scda-nx-builder:latest`.
+- **Buttons and gyro:** by default A confirms and B goes back, as on the Switch (Recomp Settings > General). Gyro
+  aiming is off until you turn it on under Recomp Settings > Controller > Gyro.
 - **Logs for a bug report:** add `logging = true` to `sdmc:/switch/scda/scda.toml`; the log is written to
   `sdmc:/switch/scda/logs/`.
 - **Tested** only the single player campaign, on a first-model Switch (V1), handheld, with a light overclock. The
