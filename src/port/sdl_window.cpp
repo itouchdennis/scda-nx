@@ -431,6 +431,10 @@ bool CreateVulkanSurface(void* instance, uint64_t* surface) {
 std::vector<const char*> VulkanInstanceExtensions() { return {}; }
 bool CreateVulkanSurface(void*, uint64_t*) { return false; }
 #endif
+#ifndef SCDA_SWITCH
+bool SurfaceSizeDiffers(uint32_t, uint32_t) { return false; }
+void SetSurfaceSize(uint32_t, uint32_t) {}
+#endif
 
 void RequestQuit() {
     g_quit = true;

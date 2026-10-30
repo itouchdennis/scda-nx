@@ -450,6 +450,7 @@ private:
     std::vector<VkSemaphore> rendered_;  // by swap chain image
     uint32_t acquire_next_ = 0;
     bool swap_stale_ = false;
+    uint32_t asked_w_ = 0, asked_h_ = 0;  // the size Swapchain was last asked for, which the surface may not give
 
     // NOOVERWRITE locks: each surface copied into a ring of host buffers, the newest the GPU has finished handed to
     // the title without waiting (gpu/d3d12.cpp does the same)
@@ -2086,6 +2087,8 @@ void VkBackend::SaveShot(Target& t) {
 bool VkBackend::Swapchain() {
     uint32_t bw, bh;
     port::DrawableSize(bw, bh);
+    asked_w_ = bw;
+    asked_h_ = bh;
     if (dev_.swapchain) fn.vkDeviceWaitIdle(dev_.dev);
     bool ok = dev_.Resize(bw, bh, app::Get().vsync);
     swap_stale_ = !ok;
@@ -2111,7 +2114,8 @@ void VkBackend::Present(const Surface& front, bool pillarbox) {
     const app::Settings& set = app::Get();
     uint32_t bw, bh;
     port::DrawableSize(bw, bh);
-    if (swap_stale_ || set.vsync != dev_.vsync || bw != dev_.swap_w || bh != dev_.swap_h) {
+    // against the size asked for, not the one made: a surface that keeps another size would rebuild every frame
+    if (swap_stale_ || set.vsync != dev_.vsync || bw != asked_w_ || bh != asked_h_) {
         if (rendering_ || recorded_) Submit();
         Swapchain();
     }

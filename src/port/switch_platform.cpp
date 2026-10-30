@@ -284,10 +284,26 @@ bool CreateVulkanSurface(void* instance, uint64_t* surface) {
     *surface = uint64_t(s);
     return true;
 }
+
+bool SurfaceSizeDiffers(uint32_t w, uint32_t h) {
+    NWindow* win = nwindowGetDefault();
+    u32 cw = 0, ch = 0;
+    return win && nwindowIsValid(win) && R_SUCCEEDED(nwindowGetDimensions(win, &cw, &ch)) && (cw != w || ch != h);
+}
+
+// 720p to 1080p and back: the caller has destroyed the swap chain, so the window holds no buffers and takes the size
+void SetSurfaceSize(uint32_t w, uint32_t h) {
+    if (Result rc = nwindowSetDimensions(nwindowGetDefault(), w, h); R_FAILED(rc))
+        LOGW("vk: window size %ux%u refused (0x%X)", w, h, rc);
+    else
+        LOGI("vk: window size %ux%u", w, h);
+}
 #else
 // the OpenGL renderer's window is SDL's
 std::vector<const char*> VulkanInstanceExtensions() { return {}; }
 bool CreateVulkanSurface(void*, uint64_t*) { return false; }
+bool SurfaceSizeDiffers(uint32_t, uint32_t) { return false; }
+void SetSurfaceSize(uint32_t, uint32_t) {}
 #endif
 
 // SCDA_STACK_MB in the environment file overrides it (16 MB as nfsu2-sw's game thread)

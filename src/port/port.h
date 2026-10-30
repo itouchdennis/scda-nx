@@ -55,6 +55,10 @@ const std::string& CommandLine();
 std::vector<const char*> VulkanInstanceExtensions();
 // instance is a VkInstance, surface receives a VkSurfaceKHR; false when the platform has none
 bool CreateVulkanSurface(void* instance, uint64_t* surface);
+// the Switch sizes its window (NWindow) itself, and the swap chain's images take that size; it changes only while no
+// swap chain holds the window's buffers. Elsewhere the surface follows the window: never differs, nothing to set
+bool SurfaceSizeDiffers(uint32_t w, uint32_t h);
+void SetSurfaceSize(uint32_t w, uint32_t h);
 void DrawableSize(uint32_t& w, uint32_t& h);
 
 #ifdef SCDA_SWITCH

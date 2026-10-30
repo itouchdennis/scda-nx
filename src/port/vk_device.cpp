@@ -220,6 +220,17 @@ bool Device::CreateDevice() {
 }
 
 bool Device::Resize(uint32_t w, uint32_t h, bool want_vsync) {
+    // a window with a size of its own (the Switch's) takes a new one only with no swap chain on it: the old one goes
+    // first, then the caps below report the new size. Handed over as oldSwapchain, it kept the window at the old size
+    // and every frame asked for a new swap chain again
+    if (port::SurfaceSizeDiffers(w, h)) {
+        for (VkImageView v : swap_views) fn.vkDestroyImageView(dev, v, nullptr);
+        swap_views.clear();
+        swap_images.clear();
+        if (swapchain) fn.vkDestroySwapchainKHR(dev, swapchain, nullptr);
+        swapchain = VK_NULL_HANDLE;
+        port::SetSurfaceSize(w, h);
+    }
     VkSurfaceCapabilitiesKHR caps{};
     if (fn.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surface, &caps) != VK_SUCCESS) return false;
     VkExtent2D extent = caps.currentExtent;
