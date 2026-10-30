@@ -1,0 +1,13 @@
+#!/bin/bash
+# meson's Rust: Switch code as aarch64-unknown-linux-gnu ELF (mesa-switch provides the std stubs); meson's sanity
+# probe runs on the host, so it gets no target and no cross linker
+for arg in "$@"; do
+    case "$arg" in *sanity_check_for_rust.rs*|*sanitycheckrs.rs*) host=1 ;; esac
+done
+if [ -z "$host" ]; then exec /usr/bin/rustc --target=aarch64-unknown-linux-gnu "$@"; fi
+args=(); skip=0
+for arg in "$@"; do
+    if [ $skip = 1 ]; then skip=0; case "$arg" in linker=*) continue ;; esac; args+=(-C "$arg"); continue; fi
+    case "$arg" in -Clinker=*) continue ;; -C) skip=1 ;; *) args+=("$arg") ;; esac
+done
+exec /usr/bin/rustc "${args[@]}"

@@ -1,0 +1,21 @@
+#include "build_info.h"
+
+1 VERSIONINFO
+FILEVERSION SCDA_VERSION, 0, 0, 0
+PRODUCTVERSION SCDA_VERSION, 0, 0, 0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "Splinter Cell: Double Agent XBE Recomp"
+            VALUE "ProductName", "Splinter Cell: Double Agent XBE Recomp"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
