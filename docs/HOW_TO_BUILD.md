@@ -15,6 +15,10 @@ The first build takes a while (from about 20 minutes to over an hour, depending 
 quicker.
 
 ## Windows (10 or 11)
+**Windows has not been tested yet.** `build-nro-windows.bat` was written for Windows 10 and 11 but has not been
+run on a real Windows PC: in the test VM, Docker Desktop could not start (nested Hyper-V). Only the Linux builders
+were run from start to finish. If you try it on Windows, please report how it went in an issue.
+
 1. Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) and start it once. Let it
    set up WSL 2 if it asks, and restart your PC if it asks.
 2. Download `build-nro-windows.bat` and put it in a folder of its own, for example `C:\scda-nx\`.
@@ -60,5 +64,6 @@ are saved on the SD card and load at once from then on.
   `docker volume rm scda-nx-cache` and `docker image rm ghcr.io/itouchdennis/scda-nx-builder:latest`.
 - **Logs for a bug report:** add `logging = true` to `sdmc:/switch/scda/scda.toml`; the log is written to
   `sdmc:/switch/scda/logs/`.
-- **Tested** only the single player campaign, on a first-model Switch (V1), handheld, with a light overclock.
+- **Tested** only the single player campaign, on a first-model Switch (V1), handheld, with a light overclock. The
+  NRO was built with the Linux builders; the Windows builder has not been tested yet.
 - **macOS** may work with Docker Desktop too, but it has not been tested (and on Apple Silicon it runs emulated and slowly).

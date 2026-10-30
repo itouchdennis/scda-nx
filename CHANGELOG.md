@@ -3,6 +3,10 @@ There are no prebuilt NROs in any release: each release holds the source and the
 yourself, from your own copy of the game ([docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md)).
 
 ## v0.3.0
+**Note: Windows has not been tested yet.** `build-nro-windows.bat` was written for Windows 10 and 11 but has not been
+run on a real Windows PC: in the test VM, Docker Desktop could not start (nested Hyper-V). Only the Linux builders
+were run from start to finish. If you try it on Windows, please report how it went in an issue.
+
 - **Windows builder:** `build-nro-windows.bat`. Double-click it and choose your game's `.iso`, or drag the `.iso` or
   the extracted disc onto it. It needs only Docker Desktop, starts it if needed, builds the NRO and opens the finished
   SD card folder.

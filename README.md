@@ -12,6 +12,8 @@ mesa-switch's NVK and runs on Linux as well, which serves as its test bed.
 > [!WARNING]
 > **What has been tested:** only the single player campaign, on a first-model Nintendo Switch (V1) in handheld mode
 > with a light overclock. Co-op, Versus, docked mode, other Switch models and stock clocks have not been tested.
+> The Windows builder (`build-nro-windows.bat`) has not been tested on Windows yet; only the Linux builders were run
+> from start to finish.
 
 > [!IMPORTANT]
 > **You must own a legally acquired copy of the game.** This repository contains no game data, no assets and no code
@@ -40,6 +42,10 @@ and patience for the first build (about 20 minutes to over an hour). Later build
 everything that can come up: [docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md).
 
 ### Windows (10 or 11)
+**Windows has not been tested yet.** `build-nro-windows.bat` was written for Windows 10 and 11 but has not been
+run on a real Windows PC: in the test VM, Docker Desktop could not start (nested Hyper-V). Only the Linux builders
+were run from start to finish. If you try it on Windows, please report how it went in an issue.
+
 1. Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) and start it once.
 2. Download [build-nro-windows.bat](build-nro-windows.bat) from the latest release and put it in a folder of its own.
 3. Double-click it and choose your game's `.iso` (or drag the `.iso` or the extracted disc's folder onto it). If

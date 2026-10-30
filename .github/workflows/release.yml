@@ -1,11 +1,17 @@
 # Makes the GitHub release for a pushed tag (v*): the notes are the tag's section of CHANGELOG.md followed by
 # docs/HOW_TO_BUILD.md, and the build scripts are attached. Never an NRO: a release holds no game data and no code made
-# from the game, the check below refuses anything else.
+# from the game, the check below refuses anything else. Run it by hand (Actions, release, Run workflow) with an
+# existing tag to rewrite that release's notes and files from the current branch.
 name: release
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: the existing tag whose release to update, e.g. v0.3.0
+        required: true
 
 permissions:
   contents: write
@@ -17,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Notes and files
         run: |
-          tag="${GITHUB_REF_NAME}"
+          tag="${{ inputs.tag || github.ref_name }}"
           awk -v t="## $tag" '$0==t{on=1;next} /^## v/{on=0} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "CHANGELOG.md has no section '## $tag'"; exit 1; }
           { echo "## What's new"; cat notes.md; echo; echo "---"; echo; sed '1s/^# /## /' docs/HOW_TO_BUILD.md; } > body.md
@@ -26,6 +32,7 @@ jobs:
           ls dist | grep -viE '^(build-nro-windows\.bat|build-nro-docker\.sh|HOW_TO_BUILD\.md)$' && exit 1 || true
       - uses: softprops/action-gh-release@v2
         with:
-          name: scda-nx ${{ github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: scda-nx ${{ inputs.tag || github.ref_name }}
           body_path: body.md
           files: dist/*
