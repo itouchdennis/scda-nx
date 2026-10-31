@@ -16,6 +16,7 @@ exit /b %errorlevel%
 #   OUT                 the output folder (default out\ beside this file)
 #   SCDA_ICON           your own 256x256 JPEG for the Homebrew Menu (default icon.jpg or switch\icon.jpg beside this file)
 #   SCDA_ANY_RELEASE=1  build from a release other than the tested one
+#   SCDA_CODE_OPT=-O2   the game code optimized as before (default -O3), for comparing
 #   SCDA_NO_PAUSE=1     close at once at the end instead of waiting for Enter (CI)
 
 # native tools report through exit codes here: with Stop, Windows PowerShell would turn their stderr into errors
@@ -105,9 +106,10 @@ if ($Icon -and (Test-Path -LiteralPath $Icon)) {
     $mounts += @('--mount', "type=bind,source=$((Resolve-Path -LiteralPath $Icon).ProviderPath),target=/icon.jpg,readonly")
 }
 $any = if ($env:SCDA_ANY_RELEASE) { $env:SCDA_ANY_RELEASE } else { '0' }
+$opt = if ($env:SCDA_CODE_OPT) { $env:SCDA_CODE_OPT } else { '-O3' }
 
 # the container runs as its own root: on Windows the files it makes in out\ belong to you either way
-docker run --rm -t -e "SCDA_ANY_RELEASE=$any" @mounts $Image
+docker run --rm -t -e "SCDA_ANY_RELEASE=$any" -e "SCDA_CODE_OPT=$opt" @mounts $Image
 if ($LASTEXITCODE -ne 0) { Fail 'the build did not finish, the reason is above' }
 
 Write-Host ''

@@ -14,6 +14,7 @@
 #   SCDA_LOCAL=1   build the builder image here from docker/Dockerfile instead of pulling it (takes long: NVK)
 #   SCDA_ICON      your own 256x256 JPEG for the Homebrew Menu (default icon.jpg or switch/icon.jpg beside this script)
 #   SCDA_ANY_RELEASE=1  build from a release other than the tested one
+#   SCDA_CODE_OPT=-O2   the game code optimized as before (default -O3), for comparing
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,6 +52,7 @@ mounts=(-v "$GAME:/game:ro" -v "$OUT:/out" -v scda-nx-cache:/cache)
 # the volume belongs to root when Docker makes it: hand it to this user once, so the build may run as you
 docker run --rm -v scda-nx-cache:/cache --entrypoint chown "$IMAGE" "$(id -u):$(id -g)" /cache
 
-docker run --rm -t --user "$(id -u):$(id -g)" -e SCDA_ANY_RELEASE="${SCDA_ANY_RELEASE:-0}" "${mounts[@]}" "$IMAGE"
+docker run --rm -t --user "$(id -u):$(id -g)" -e SCDA_ANY_RELEASE="${SCDA_ANY_RELEASE:-0}" \
+    -e SCDA_CODE_OPT="${SCDA_CODE_OPT:--O3}" "${mounts[@]}" "$IMAGE"
 echo
 echo "Your SD card folder: $OUT/switch"

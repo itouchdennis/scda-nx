@@ -22,6 +22,8 @@
 #                  where switch/nvk/build-nvk.sh installs it)
 #   (logging: off by default, "logging = true" in sdmc:/switch/scda/scda.toml writes the full log to logs/)
 #   JOBS           parallel compile jobs (default: by free memory, the generated files need ~1.5 GB each)
+#   SCDA_CODE_OPT  the recompiled game code's optimization: -O3 (default) or -O2, for comparing; a change rebuilds
+#                  all of it
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -48,7 +50,8 @@ fi
 cmake -S "$REPO" -B "$BUILD" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/cmake/Switch.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DSCDA_GEN_DIR="$GEN" -DSCDA_GPU="$GPU" ${SCDA_ICON:+-DSCDA_ICON="$SCDA_ICON"} -DSCDA_NVK_SDK="$NVK" -DSCDA_VERBOSE_LOG=OFF >/dev/null
+    -DSCDA_GEN_DIR="$GEN" -DSCDA_GPU="$GPU" ${SCDA_ICON:+-DSCDA_ICON="$SCDA_ICON"} -DSCDA_NVK_SDK="$NVK" -DSCDA_VERBOSE_LOG=OFF \
+    -DSCDA_CODE_OPT="${SCDA_CODE_OPT:--O3}" >/dev/null
 ninja -C "$BUILD" -j"$JOBS"
 
 # the version an NRO carries: its NACP's display version (the NRO's assets after its size, the NACP at their offset)

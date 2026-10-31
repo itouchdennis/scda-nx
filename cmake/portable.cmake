@@ -55,9 +55,10 @@ elseif(NOT EXISTS ${GEN}/image_symbols.h)
     message(FATAL_ERROR "no generated code in ${GEN}: run tools/regen.sh first")
 endif()
 
-# the recompiled code: strict aliasing off as on Windows, warnings off (generated), no frame pointer needed; its
-# optimization another for measuring with -DSCDA_CODE_OPT (after the build type's, so it wins)
-set(SCDA_CODE_OPT "-O2" CACHE STRING "optimization flags for the recompiled game code")
+# the recompiled code: strict aliasing off as on Windows, warnings off (generated), no frame pointer needed. -O3 (after
+# the build type's, so it wins): 3.4% less frame time than -O2 on the Switch (JBA headquarters part 1, standing);
+# SCDA_CODE_OPT=-O2 for comparing
+set(SCDA_CODE_OPT "-O3" CACHE STRING "optimization flags for the recompiled game code")
 if(NOT SCDA_CHECK_ONLY)
     add_library(scda_code OBJECT ${GEN_SOURCES})
     target_include_directories(scda_code PRIVATE src ${GEN})
@@ -170,6 +171,7 @@ target_include_directories(scda PRIVATE src src/port/include ${GEN})
 target_include_directories(scda SYSTEM PRIVATE ${imgui_SOURCE_DIR} ${GPU_INCLUDES})
 target_compile_options(scda PRIVATE -fno-strict-aliasing -Wno-unused-parameter)
 target_compile_definitions(scda PRIVATE SCDA_PORT $<$<BOOL:${SCDA_VERBOSE_LOG}>:SCDA_VERBOSE_LOG>
+    "SCDA_CODE_OPT_NAME=\"${SCDA_CODE_OPT}\""
     $<$<STREQUAL:${SCDA_GPU},gl>:SCDA_GL> $<$<STREQUAL:${SCDA_GPU},vk>:SCDA_VK>
     $<$<AND:$<STREQUAL:${SCDA_GPU},vk>,$<NOT:$<BOOL:${SCDA_SWITCH}>>>:SCDA_SDL_VULKAN>)
 target_link_libraries(scda PRIVATE tomlplusplus::tomlplusplus SDL2::SDL2 ${GPU_LIBS} Threads::Threads)
