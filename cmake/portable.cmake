@@ -55,11 +55,14 @@ elseif(NOT EXISTS ${GEN}/image_symbols.h)
     message(FATAL_ERROR "no generated code in ${GEN}: run tools/regen.sh first")
 endif()
 
-# the recompiled code: strict aliasing off as on Windows, warnings off (generated), no frame pointer needed
+# the recompiled code: strict aliasing off as on Windows, warnings off (generated), no frame pointer needed; its
+# optimization another for measuring with -DSCDA_CODE_OPT (after the build type's, so it wins)
+set(SCDA_CODE_OPT "-O2" CACHE STRING "optimization flags for the recompiled game code")
 if(NOT SCDA_CHECK_ONLY)
     add_library(scda_code OBJECT ${GEN_SOURCES})
     target_include_directories(scda_code PRIVATE src ${GEN})
-    target_compile_options(scda_code PRIVATE -O2 -fno-strict-aliasing -w)
+    separate_arguments(SCDA_CODE_OPT_LIST UNIX_COMMAND "${SCDA_CODE_OPT}")
+    target_compile_options(scda_code PRIVATE ${SCDA_CODE_OPT_LIST} -fno-strict-aliasing -w)
     if(NOT CMAKE_CROSSCOMPILING)
         add_dependencies(scda_code recompile)
     endif()
