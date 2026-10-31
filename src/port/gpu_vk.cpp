@@ -437,8 +437,11 @@ private:
         VkRect2D sc;
     } dyn_{};
     VkShaderEXT bound_vs_ = VK_NULL_HANDLE, bound_ps_ = VK_NULL_HANDLE;
-    std::vector<VkVertexInputBindingDescription2EXT> vin_bind_;
-    std::vector<VkVertexInputAttributeDescription2EXT> vin_attr_;
+    // the vertex input last set: 16 buffers and 16 registers at most, in arrays, as the heap's lock is the game's thread's
+    // too and two vectors a draw were most of the render thread's 100,000 heap calls a second
+    std::array<VkVertexInputBindingDescription2EXT, 16> vin_bind_{};
+    std::array<VkVertexInputAttributeDescription2EXT, 16> vin_attr_{};
+    uint32_t vin_binds_ = 0, vin_attrs_ = 0;
     bool vin_set_ = false;
 
     std::unordered_map<uint64_t, Target> targets_;
@@ -1881,16 +1884,18 @@ bool VkBackend::UploadVertices(const Assembled& a, Vertices& v) {
 }
 
 void VkBackend::SetVertexInputs(const Assembled& a, const int8_t* locations, const Vertices& v) {
-    std::vector<VkVertexInputBindingDescription2EXT> bind;
-    for (uint32_t i = 0; i < a.buffer_count; i++) {
+    std::array<VkVertexInputBindingDescription2EXT, 16> bind;
+    uint32_t binds = std::min<uint32_t>(a.buffer_count, 16);
+    for (uint32_t i = 0; i < binds; i++) {
         VkVertexInputBindingDescription2EXT d{VK_STRUCTURE_TYPE_VERTEX_INPUT_BINDING_DESCRIPTION_2_EXT};
         d.binding = i;
         d.stride = a.buffers[i].stride;
         d.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
         d.divisor = 1;
-        bind.push_back(d);
+        bind[i] = d;
     }
-    std::vector<VkVertexInputAttributeDescription2EXT> attr;
+    std::array<VkVertexInputAttributeDescription2EXT, 16> attr;
+    uint32_t attrs = 0;
     for (int r = 0; r < 16; r++) {
         if (!((a.regs >> r) & 1) || locations[r] < 0) continue;
         const VertexElement& e = a.elements[size_t(r)];
@@ -1904,15 +1909,17 @@ void VkBackend::SetVertexInputs(const Assembled& a, const int8_t* locations, con
         d.binding = e.buffer;
         d.format = f;
         d.offset = e.offset;
-        attr.push_back(d);
+        attr[attrs++] = d;
     }
-    auto same = [](const auto& x, const auto& y) {
-        return x.size() == y.size() && !std::memcmp(x.data(), y.data(), x.size() * sizeof(x[0]));
+    auto same = [](const auto& x, uint32_t n, const auto& y, uint32_t m) {
+        return n == m && !std::memcmp(x.data(), y.data(), n * sizeof(x[0]));
     };
-    if (!vin_set_ || !same(bind, vin_bind_) || !same(attr, vin_attr_)) {
-        fn.vkCmdSetVertexInputEXT(Cmd(), uint32_t(bind.size()), bind.data(), uint32_t(attr.size()), attr.data());
-        vin_bind_ = std::move(bind);
-        vin_attr_ = std::move(attr);
+    if (!vin_set_ || !same(bind, binds, vin_bind_, vin_binds_) || !same(attr, attrs, vin_attr_, vin_attrs_)) {
+        fn.vkCmdSetVertexInputEXT(Cmd(), binds, bind.data(), attrs, attr.data());
+        std::copy_n(bind.begin(), binds, vin_bind_.begin());
+        std::copy_n(attr.begin(), attrs, vin_attr_.begin());
+        vin_binds_ = binds;
+        vin_attrs_ = attrs;
         vin_set_ = true;
     }
     if (a.buffer_count) fn.vkCmdBindVertexBuffers(Cmd(), 0, a.buffer_count, v.buf, v.off);

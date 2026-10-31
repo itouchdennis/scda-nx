@@ -11,6 +11,7 @@
 #include <switch.h>
 
 #include <algorithm>
+#include <malloc.h>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -22,6 +23,10 @@
 #include "core/log.h"
 #include "kernel/kernel.h"
 #include "port/port.h"
+
+// libnx: the heap newlib allocates from
+extern "C" char* fake_heap_start;
+extern "C" char* fake_heap_end;
 
 namespace port {
 
@@ -236,11 +241,13 @@ void EndWindow(u64 window_ns) {
     std::sort(std::begin(sites), std::end(sites), [](const AllocSite& a, const AllocSite& b) { return a.count > b.count; });
     double seconds = double(window_ns) / 1e9;
     LOGR("perf: heap calls %.0f a second", double(g_alloc_calls.exchange(0)) / seconds);
-    // what the process may use and uses: the room a RAM cache would have
-    u64 total = 0, used = 0;
-    svcGetInfo(&total, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
-    svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
-    LOGR("perf: memory %llu MB of %llu MB used", (unsigned long long)(used >> 20), (unsigned long long)(total >> 20));
+    // the heap libnx gave newlib at start (the system counts all of it used) and what newlib has handed out of it:
+    // the room a RAM cache would have
+    struct mallinfo mi = mallinfo();
+    u64 heap = u64(fake_heap_end - fake_heap_start);
+    u64 taken = u64(mi.arena) - u64(mi.fordblks);
+    LOGR("perf: memory: heap %llu MB, %llu MB of it allocated, %llu MB free", (unsigned long long)(heap >> 20),
+         (unsigned long long)(taken >> 20), (unsigned long long)((heap - taken) >> 20));
     for (size_t i = 0; i < 12 && sites[i].count; i++) {
         const char* who = "?";
         for (Named& n : g_named)
