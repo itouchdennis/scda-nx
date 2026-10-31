@@ -132,6 +132,10 @@ std::mutex& DispatchLock();
 void SignalChanged();  // wakes every waiter, caller holds the lock
 void SetSignal(Object& o, int32_t v);
 uint32_t Wait(const std::vector<ObjectRef>& objs, bool wait_all, int64_t timeout_100ns, bool alertable);
+// For the port's profiler: the ways the title's threads wait that keep a core busy or wake it for nothing (the
+// battery). Sleep(0) yields, waits with no timeout (polls), wake-ups of waits (every 50 ms an untimed wait looks for
+// APCs), slices of a sleep (2 ms at most), and nanoseconds spun in KeStallExecutionProcessor.
+inline std::atomic<uint64_t> g_yields{0}, g_polls{0}, g_wait_wakes{0}, g_sleep_slices{0}, g_stall_ns{0};
 int32_t SetEvent(Object& o);
 int32_t ResetEvent(Object& o);
 int32_t PulseEvent(Object& o);

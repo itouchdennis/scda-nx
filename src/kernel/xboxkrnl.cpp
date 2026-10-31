@@ -221,8 +221,12 @@ KERNEL_EXPORT(127, KeQueryPerformanceFrequency, 0) {
 }
 
 KERNEL_EXPORT(151, KeStallExecutionProcessor, 1) {
-    auto until = std::chrono::steady_clock::now() + std::chrono::microseconds(a[0]);
+    auto start = std::chrono::steady_clock::now();
+    auto until = start + std::chrono::microseconds(a[0]);
     while (std::chrono::steady_clock::now() < until) std::this_thread::yield();
+    g_stall_ns.fetch_add(uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - start).count()),
+                         std::memory_order_relaxed);
     return 0;
 }
 
@@ -236,11 +240,13 @@ KERNEL_EXPORT(99, KeDelayExecutionThread, 3) {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     };
     if (interval == 0) {
+        g_yields.fetch_add(1, std::memory_order_relaxed);
         std::this_thread::yield();
         return kSuccess;
     }
     while (now() < deadline) {
         int64_t left = deadline - now();
+        g_sleep_slices.fetch_add(1, std::memory_order_relaxed);
         std::this_thread::sleep_for(std::chrono::nanoseconds(std::min<int64_t>(left, 2000000)));
         if (alertable && t && RunApcs(*t)) return kUserApc;
     }

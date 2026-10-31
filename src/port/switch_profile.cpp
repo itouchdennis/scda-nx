@@ -232,6 +232,12 @@ void EndWindow(u64 window_ns) {
     LOGR("perf: cores 0 1 2 asked for %.0f%% %.0f%% %.0f%% by the named threads, %u samples refused", cores[0] * 100,
          cores[1] * 100, cores[2] * 100, g_failed.exchange(0));
     LOGR("perf: files, %s", kernel::TakeFileStats().c_str());
+    // waiting that keeps a core busy or wakes it for nothing: what the battery pays without a frame for it
+    auto rate = [&](std::atomic<uint64_t>& n) { return double(n.exchange(0)) * 1e9 / double(window_ns); };
+    auto ms = [&](std::atomic<uint64_t>& ns) { return double(ns.exchange(0)) / 1e6 * 1e9 / double(window_ns); };
+    LOGR("perf: waiting, a second: %.0f Sleep(0), %.0f polls, %.0f wake-ups of waits, %.0f sleep slices; spun %.1f ms "
+         "in stalls, %.1f ms in the frame cap", rate(kernel::g_yields), rate(kernel::g_polls), rate(kernel::g_wait_wakes),
+         rate(kernel::g_sleep_slices), ms(kernel::g_stall_ns), ms(g_pace_spin_ns));
     // the window's allocations, and the call chains sampled most, by thread
     static AllocSite sites[kAllocSites];
     mutexLock(&g_alloc_lock);

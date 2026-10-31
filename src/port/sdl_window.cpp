@@ -365,7 +365,9 @@ void Pace() {
     next += period;
     if (next < now - period) next = now;
     while (clock::now() + std::chrono::milliseconds(2) < next) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    auto spin = clock::now();
     while (clock::now() < next) std::this_thread::yield();
+    port::g_pace_spin_ns.fetch_add(uint64_t((clock::now() - spin).count()), std::memory_order_relaxed);
 }
 
 // in the background the game and its sound hold still, as on Windows

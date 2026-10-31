@@ -1,6 +1,7 @@
 #pragma once
 // What the Windows host asks of Win32 and the port asks of its platform: SDL2 on Linux (linux_*.cpp), SDL2 and libnx
 // on the Switch (switch_*.cpp); the shared parts in the other files here.
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -30,6 +31,8 @@ void ThreadStarted();
 // the calling thread takes this core for its own (the Switch: the game's thread 2, the render thread 1); a no-op
 // elsewhere
 void TakeCore(int core);
+// ns the frame rate cap spun to hit its time (sdl_window.cpp), for the profiler: a core kept awake
+inline std::atomic<uint64_t> g_pace_spin_ns{0};
 // the calling thread's time on a CPU so far, in ns (0 where unknown): set against wall time it shows waiting for a core
 uint64_t ThreadCpuNs();
 // the log goes to stderr too: always on Linux, on the Switch when started by nxlink -s (stderr is the PC then)

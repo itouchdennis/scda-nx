@@ -205,6 +205,7 @@ uint32_t Wait(const std::vector<ObjectRef>& objs, bool wait_all, int64_t timeout
     uint32_t me = Me();
     bool infinite = timeout == INT64_MAX;
     int64_t deadline = infinite ? 0 : ToDeadline(timeout);
+    if (timeout == 0) g_polls.fetch_add(1, std::memory_order_relaxed);
     std::unique_lock<std::mutex> lock(g_dispatch);
     struct Queued {
         const std::vector<ObjectRef>& objs;
@@ -262,6 +263,7 @@ uint32_t Wait(const std::vector<ObjectRef>& objs, bool wait_all, int64_t timeout
             if (!queued.on) queued.Add();
             queued.w.cv.wait_for(lock, milliseconds(50));
         }
+        g_wait_wakes.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
