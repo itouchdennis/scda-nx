@@ -117,6 +117,7 @@ void Spawn(std::function<void()> fn) {
         port::ThreadStarted();
         std::unique_ptr<std::function<void()>> g(static_cast<std::function<void()>*>(p));
         (*g)();
+        port::ThreadEnded();
         return nullptr;
     }, f);
     if (err) {

@@ -63,6 +63,8 @@ void Fatal(const std::string& title, const std::string& text) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title.c_str(), text.c_str(), nullptr);
 }
 
+void ThreadEnded() {}
+
 void NameThread(const char* name) {
     char n[16] = {};
     std::strncpy(n, name, sizeof(n) - 1);

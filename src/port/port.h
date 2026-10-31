@@ -20,6 +20,8 @@ std::filesystem::path HomeDir();
 void Fatal(const std::string& title, const std::string& text);
 // names the calling host thread for the debugger and the log
 void NameThread(const char* name);
+// the thread that called NameThread is about to end
+void ThreadEnded();
 // a host thread's stack: recompiled code nests host frames as deep as the guest's calls. 64 MB of address space on
 // Linux; on the Switch the stack is real heap, so less.
 size_t ThreadStackSize();
@@ -50,6 +52,8 @@ bool Relaunched();
 void KeepClocks(uint32_t cpu_mhz);
 // the main thread's event loop: leaves once Relaunch (for the next NRO) or Exit (for the HOME menu) has been called
 void ServiceRelaunch();
+// the perf branch's thread and profiler diagnostics (switch_profile.cpp), while logging is on
+void StartProfiler();
 #endif
 // the arguments this run started with, space separated (--coop-host= and the like, as on Windows)
 const std::string& CommandLine();

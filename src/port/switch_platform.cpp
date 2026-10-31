@@ -257,6 +257,7 @@ void Init(int argc, char** argv) {
     }).detach();
     // the game handles home and the power button through the applet's own suspension; its threads keep the CPU
     RaiseClocks();
+    StartProfiler();
 }
 
 const std::string& CommandLine() { return g_command_line; }
@@ -292,7 +293,6 @@ void Fatal(const std::string& title, const std::string& text) {
     if (R_SUCCEEDED(errorApplicationCreate(&c, dialog.c_str(), nullptr))) errorApplicationShow(&c);
 }
 
-void NameThread(const char*) {}
 
 #ifdef SCDA_VK
 // NVK presents to the default NWindow through VK_NN_vi_surface; no SDL window holds it (sdl_window.cpp)
