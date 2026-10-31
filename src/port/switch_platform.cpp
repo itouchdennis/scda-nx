@@ -352,19 +352,42 @@ size_t ThreadStackSize() {
     return (n >= 1 && n <= 64 ? n : 16) << 20;
 }
 
-// libnx starts every thread with core 0 preferred: deal them round robin over the cores the process may use, 0 to 2
-// (core 3 is the system's and does not time-slice the default priority)
-void ThreadStarted() {
-    static std::atomic<int> next{1};  // core 0 runs the main thread's event loop
+namespace {
+// the cores the process may use, 0 to 2 (core 3 is the system's and does not time-slice the default priority)
+u32 GameCores() {
     u64 mask = 0;
-    if (R_FAILED(svcGetInfo(&mask, InfoType_CoreMask, CUR_PROCESS_HANDLE, 0))) return;
-    mask &= 0x7;
+    if (R_FAILED(svcGetInfo(&mask, InfoType_CoreMask, CUR_PROCESS_HANDLE, 0))) return 0;
+    return u32(mask & 0x7);
+}
+
+constexpr s32 kDefaultPriority = 0x2C;
+constexpr s32 kOwnerPriority = 0x2B;  // above the others, so one that strays onto an owned core gives way
+std::atomic<Handle> g_core_owner[3] = {};
+}  // namespace
+
+// Every thread prefers core 0 and may run on all three: the game's thread and the render thread take core 2 and
+// core 1 for their own (TakeCore). Dealt round robin before, the two often shared a core while another stood idle.
+void ThreadStarted() {
+    u32 mask = GameCores();
     if (!mask || !(mask & (mask - 1))) return;
-    int k = next.fetch_add(1) % __builtin_popcountll(mask);
-    int core = 0;
-    for (; core < 3; core++)
-        if (((mask >> core) & 1) && k-- == 0) break;
-    svcSetThreadCoreMask(CUR_THREAD_HANDLE, core, u32(mask));
+    svcSetThreadCoreMask(CUR_THREAD_HANDLE, __builtin_ctz(mask), mask);
+}
+
+void TakeCore(int core) {
+    Handle self = threadGetCurHandle();
+    if (core >= 0 && core <= 2 && g_core_owner[core].load() == self) return;  // each frame: no system call
+    u32 mask = GameCores();
+    if (core < 0 || core > 2 || !(mask >> core & 1) || !(mask & ~(1u << core))) return;
+    Handle before = g_core_owner[core].exchange(self);
+    if (before == self) return;
+    // the core's last owner (the loading screen's thread, say) is one thread among the others again
+    if (before) {
+        svcSetThreadCoreMask(before, __builtin_ctz(mask & ~(1u << core)), mask);
+        svcSetThreadPriority(before, kDefaultPriority);
+    }
+    Result rc = svcSetThreadCoreMask(self, core, 1u << core);
+    if (R_SUCCEEDED(rc)) svcSetThreadPriority(self, kOwnerPriority);
+    LOGR("threads: core %d for this thread alone%s", core, R_SUCCEEDED(rc) ? "" : " (refused)");
 }
 
 uint64_t ThreadCpuNs() {

@@ -3,8 +3,10 @@
 // - every 10 s, each named thread's CPU time over the window and its preferred core, and the cores' sums: whether the
 //   game's thread shares its core with others
 // - a sampling profiler on the busiest threads of the window before: about 500 times a second each is paused, its
-//   program counter counted, and let go. logs/profile.txt holds the counts of the whole run (offsets into scda.elf,
-//   which addr2line or nm turn into functions), the log the top ones of each window.
+//   program counter counted, and let go. A thread in a system call (the instruction before its program counter an
+//   svc) has its return address counted too: who made the call. logs/profile.txt holds the counts of the whole run
+//   (offsets into scda.elf from the module's base, which addr2line or nm turn into functions), the log the top ones
+//   of each window.
 #include <switch.h>
 
 #include <algorithm>
@@ -18,8 +20,6 @@
 
 #include "core/log.h"
 #include "port/port.h"
-
-extern "C" char __start__[];
 
 namespace port {
 
@@ -41,11 +41,14 @@ struct Named {
     double share = 0;  // of a core over the last window
     bool sampled = false;
     std::unordered_map<u32, u32> window;  // bucket offset to samples, this window
+    std::unordered_map<u32, u32> callers;  // of the samples in a system call: the caller's bucket, this window
 };
 
 std::mutex g_lock;
 std::vector<Named> g_named;
 std::unordered_map<std::string, std::unordered_map<u32, u32>> g_run;  // by thread name, the whole run
+std::unordered_map<std::string, std::unordered_map<u32, u32>> g_run_callers;
+u64 g_base = 0;  // the module's: where scda.elf's address 0 is
 std::atomic<u32> g_failed{0};  // samples the kernel refused
 
 u64 Ticks(Handle h) {
@@ -59,26 +62,55 @@ int PreferredCore(Handle h) {
     return R_SUCCEEDED(svcGetThreadCoreMask(&core, &mask, h)) ? core : -1;
 }
 
-// the thread paused, its program counter read, and let go; 0 when the kernel would not
-u64 SamplePc(Handle h) {
-    if (R_FAILED(svcSetThreadActivity(h, ThreadActivity_Paused))) return 0;
+struct Sample {
+    u64 pc = 0;
+    u64 lr = 0;
+};
+
+// the thread paused, its program counter and return address read, and let go; pc 0 when the kernel would not
+Sample Take(Handle h) {
+    if (R_FAILED(svcSetThreadActivity(h, ThreadActivity_Paused))) return {};
     ThreadContext ctx{};
     Result rc = svcGetThreadContext3(&ctx, h);
     svcSetThreadActivity(h, ThreadActivity_Runnable);
-    return R_SUCCEEDED(rc) ? ctx.pc.x : 0;
+    if (R_FAILED(rc)) return {};
+    return {ctx.pc.x, ctx.lr};
+}
+
+// the module's base: the start of the code region this function is in (an NRO's text begins at its address 0)
+u64 ModuleBase() {
+    MemoryInfo mi{};
+    u32 pi = 0;
+    if (R_FAILED(svcQueryMemory(&mi, &pi, reinterpret_cast<u64>(&ModuleBase)))) return 0;
+    return mi.addr;
+}
+
+bool InModule(u64 pc) { return pc >= g_base && pc - g_base < 0x80000000ull; }
+
+// an AArch64 svc #imm: the thread stopped in a system call
+bool AfterSvc(u64 pc) {
+    if (pc - g_base < 4) return false;
+    u32 insn = 0;
+    std::memcpy(&insn, reinterpret_cast<const void*>(pc - 4), 4);
+    return (insn & 0xFFE0001F) == 0xD4000001;
+}
+
+void WriteCounts(FILE* f, const char* what, const std::string& name, const std::unordered_map<u32, u32>& counts) {
+    std::vector<std::pair<u32, u32>> v(counts.begin(), counts.end());
+    std::sort(v.begin(), v.end(), [](auto& a, auto& b) { return a.second > b.second; });
+    std::fprintf(f, "%s %s\n", what, name.c_str());
+    for (auto& [off, n] : v) std::fprintf(f, "%08X %u\n", off, n);
 }
 
 // every name's counts of the run so far, as offsets into scda.elf; overwritten each window
 void WriteRun() {
     FILE* f = std::fopen("sdmc:/switch/scda/logs/profile.txt", "w");
     if (!f) return;
-    std::fprintf(f, "# offsets into scda.elf (%u byte buckets), samples\n", kBucket);
-    for (auto& [name, counts] : g_run) {
-        std::vector<std::pair<u32, u32>> v(counts.begin(), counts.end());
-        std::sort(v.begin(), v.end(), [](auto& a, auto& b) { return a.second > b.second; });
-        std::fprintf(f, "thread %s\n", name.c_str());
-        for (auto& [off, n] : v) std::fprintf(f, "%08X %u\n", off, n);
-    }
+    std::fprintf(f, "# offsets into scda.elf (%u byte buckets), samples; module base %llX\n", kBucket,
+                 (unsigned long long)g_base);
+    std::fprintf(f, "# thread: where it was; callers: who made the system call it was in\n");
+    for (auto& [name, counts] : g_run) WriteCounts(f, "thread", name, counts);
+    for (auto& [name, counts] : g_run_callers) WriteCounts(f, "callers", name, counts);
     std::fclose(f);
 }
 
@@ -117,7 +149,10 @@ void EndWindow(u64 window_ns) {
         LOGR("perf: %s, %u samples, top:%s", n.name.c_str(), total, line.c_str());
         auto& run = g_run[n.name];
         for (auto& [off, c] : v) run[off] += c;
+        auto& callers = g_run_callers[n.name];
+        for (auto& [off, c] : n.callers) callers[off] += c;
         n.window.clear();
+        n.callers.clear();
     }
     std::sort(by_share.begin(), by_share.end(), [](Named* a, Named* b) { return a->share > b->share; });
     for (Named& n : g_named) n.sampled = false;
@@ -127,7 +162,6 @@ void EndWindow(u64 window_ns) {
 }
 
 void Profile(void*) {
-    const u64 base = reinterpret_cast<u64>(__start__);
     u64 window_start = armTicksToNs(armGetSystemTick());
     for (;;) {
         svcSleepThread(kSampleNs);
@@ -135,12 +169,13 @@ void Profile(void*) {
         std::lock_guard lock(g_lock);
         for (Named& n : g_named) {
             if (!n.sampled) continue;
-            u64 pc = SamplePc(n.handle);
-            if (!pc || pc < base) {
+            Sample s = Take(n.handle);
+            if (!InModule(s.pc)) {
                 g_failed++;
                 continue;
             }
-            n.window[u32((pc - base) / kBucket * kBucket)]++;
+            n.window[u32((s.pc - g_base) / kBucket * kBucket)]++;
+            if (AfterSvc(s.pc) && InModule(s.lr)) n.callers[u32((s.lr - g_base) / kBucket * kBucket)]++;
         }
         u64 now = armTicksToNs(armGetSystemTick());
         if (now - window_start >= kWindowNs) {
@@ -176,8 +211,9 @@ void StartProfiler() {
     static Thread t;
     // above the game's threads, so a round of samples is not held up; on core 0 with the main thread's event loop
     if (!g_profiling) return;
+    g_base = ModuleBase();
     if (R_SUCCEEDED(threadCreate(&t, Profile, nullptr, nullptr, 0x10000, 0x20, 0))) threadStart(&t);
-    LOGR("perf: profiler on");
+    LOGR("perf: profiler on, module base %llX", (unsigned long long)g_base);
 }
 
 }  // namespace port

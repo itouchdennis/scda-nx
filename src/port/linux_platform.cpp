@@ -65,6 +65,8 @@ void Fatal(const std::string& title, const std::string& text) {
 
 void ThreadEnded() {}
 
+void TakeCore(int) {}
+
 void NameThread(const char* name) {
     char n[16] = {};
     std::strncpy(n, name, sizeof(n) - 1);

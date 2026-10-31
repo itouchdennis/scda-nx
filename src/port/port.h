@@ -27,6 +27,9 @@ void ThreadEnded();
 size_t ThreadStackSize();
 // first thing on each new host thread: the Switch deals the threads over its cores (libnx puts all on core 0)
 void ThreadStarted();
+// the calling thread takes this core for its own (the Switch: the game's thread 2, the render thread 1); a no-op
+// elsewhere
+void TakeCore(int core);
 // the calling thread's time on a CPU so far, in ns (0 where unknown): set against wall time it shows waiting for a core
 uint64_t ThreadCpuNs();
 // the log goes to stderr too: always on Linux, on the Switch when started by nxlink -s (stderr is the PC then)

@@ -45,8 +45,10 @@
 
 namespace {
 
-std::vector<X86Func*> g_table;  // one slot per code byte
-std::vector<bool> g_continuation;
+// one slot per code byte: the host function's address, its low bit set at a continuation (a return address a
+// recompiled call resumes at), so an indirect call reads one slot instead of a slot and a bit elsewhere
+std::vector<uintptr_t> g_table;
+constexpr uintptr_t kContinuation = 1;
 uint32_t g_lo = 0, g_hi = 0;
 // the recompiled code's tables, exported by the game code DLL
 const X86FuncMapping* g_mappings = nullptr;
@@ -98,18 +100,21 @@ bool Load(const std::filesystem::path& dll) {
 uint32_t EntryPoint() { return g_entry; }
 
 void Init() {
-    g_table.assign(g_hi - g_lo, nullptr);
-    size_t n = 0;
-    for (const X86FuncMapping* m = g_mappings; m->host; m++, n++)
-        if (m->guest >= g_lo && m->guest < g_hi) g_table[m->guest - g_lo] = m->host;
-    g_continuation.assign(g_hi - g_lo, false);
+    g_table.assign(g_hi - g_lo, 0);
+    size_t n = 0, odd = 0;
+    for (const X86FuncMapping* m = g_mappings; m->host; m++, n++) {
+        uintptr_t host = reinterpret_cast<uintptr_t>(m->host);
+        odd += host & kContinuation;  // ARM's code is 4 byte aligned, -O2's x86 functions 16
+        if (m->guest >= g_lo && m->guest < g_hi) g_table[m->guest - g_lo] = host;
+    }
+    if (odd) LOGE("dispatch: %zu functions at odd addresses would read as continuations", odd);
     for (const uint32_t* c = g_continuations; *c; c++)
-        if (*c >= g_lo && *c < g_hi) g_continuation[*c - g_lo] = true;
+        if (*c >= g_lo && *c < g_hi) g_table[*c - g_lo] |= kContinuation;
     LOGI("dispatch: %zu functions over %08X..%08X", n, g_lo, g_hi);
 }
 
 X86Func* Find(uint32_t guest) {
-    if (guest >= g_lo && guest < g_hi) return g_table[guest - g_lo];
+    if (guest >= g_lo && guest < g_hi) return reinterpret_cast<X86Func*>(g_table[guest - g_lo] & ~kContinuation);
     return nullptr;
 }
 
@@ -132,10 +137,13 @@ uint32_t KernelThunkAddress(uint32_t ordinal) { return kKernelThunkBase + ordina
 
 void x86_icall(X86Context& ctx, uint8_t* base, uint32_t target) {
     ctx.last_icall = target;
-    if (target >= g_lo && target < g_hi && g_continuation[target - g_lo]) throw X86Resume{target, ctx.esp};
-    if (X86Func* f = dispatch::Find(target)) {
-        f(ctx, base);
-        return;
+    if (target - g_lo < g_hi - g_lo) {
+        uintptr_t slot = g_table[target - g_lo];
+        if (slot & kContinuation) throw X86Resume{target, ctx.esp};
+        if (slot) {
+            reinterpret_cast<X86Func*>(slot)(ctx, base);
+            return;
+        }
     }
     if (target >= kKernelThunkBase && target < kKernelThunkBase + 400 * 4) {
         x86_kernel(ctx, base, (target - kKernelThunkBase) / 4);

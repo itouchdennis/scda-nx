@@ -17,6 +17,8 @@
 #endif
 #ifdef __SSE4_1__
 #include <smmintrin.h>
+#elif defined(__aarch64__)
+#include <arm_neon.h>
 #endif
 
 #include <algorithm>
@@ -96,11 +98,10 @@ std::vector<Range> StateRanges() {
     };
 }
 
-// equal bytes, 16 at a time: most of the state is compared on every draw
+// equal bytes, 16 at a time: most of the state is compared on every draw (on the Switch a memcmp call for each 64
+// bytes was a tenth of the game's thread)
 bool Same(const uint8_t* a, const uint8_t* b, size_t n) {
-#ifndef __SSE4_1__
-    return !std::memcmp(a, b, n);
-#else
+#if defined(__SSE4_1__)
     size_t i = 0;
     __m128i diff = _mm_setzero_si128();
     for (; i + 16 <= n; i += 16)
@@ -108,6 +109,16 @@ bool Same(const uint8_t* a, const uint8_t* b, size_t n) {
                                                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(b + i))));
     if (!_mm_testz_si128(diff, diff)) return false;
     return i == n || !std::memcmp(a + i, b + i, n - i);
+#elif defined(__aarch64__)
+    size_t i = 0;
+    uint8x16_t diff = vdupq_n_u8(0);
+    for (; i + 16 <= n; i += 16) diff = vorrq_u8(diff, veorq_u8(vld1q_u8(a + i), vld1q_u8(b + i)));
+    if (vmaxvq_u8(diff)) return false;
+    for (; i < n; i++)
+        if (a[i] != b[i]) return false;
+    return true;
+#else
+    return !std::memcmp(a, b, n);
 #endif
 }
 
@@ -205,6 +216,10 @@ public:
     }
 
     void Present(const Surface& front, bool pillarbox) override {
+#ifndef _WIN32
+        // the thread that shows the frames is the one the frame rate waits on
+        port::TakeCore(2);
+#endif
         Cmd c{Op::Present};
         c.a = pillarbox;
         c.s1 = front;
@@ -244,12 +259,13 @@ public:
         char line[512];
         int n = 0;
         for (size_t i = 0; i < kOps; i++) {
-            uint64_t w = op_ns_[i].exchange(0), c = op_cpu_[i].exchange(0);
+            uint64_t w = op_ns_[i].exchange(0);
             if (w >= 1'000'000 && n < int(sizeof(line)) - 64)
-                n += std::snprintf(line + n, sizeof(line) - size_t(n), " %s %.1f/%.1f", kOpNames[i],
-                                   double(w) / 1e6 / double(frames), double(c) / 1e6 / double(frames));
+                n += std::snprintf(line + n, sizeof(line) - size_t(n), " %s %.1f", kOpNames[i],
+                                   double(w) / 1e6 / double(frames));
         }
-        LOGR("render thread: ms a frame by command, wall/on a CPU:%s", n ? line : " none");
+        LOGR("render thread: ms a frame by command:%s; on a CPU %.1f ms of them", n ? line : " none",
+             double(busy_cpu_ns_.exchange(0)) / 1e6 / double(frames));
         wait_ns_ = {};
         gpu_wait_ns_ = 0;
         report_presents_ = presents_;
@@ -371,7 +387,7 @@ private:
         Recent<HeaderCopy>& r = recent_headers_[(header >> 3) & 63];
         HeaderCopy& c = r.key == header ? *r.value : headers_[header];
         r = {header, &c};
-        if (c.made && !std::memcmp(c.bytes, now, kHeaderBytes) && ring_pos_ - c.made < kHeaderRing / 2) return c.at;
+        if (c.made && Same(c.bytes, now, kHeaderBytes) && ring_pos_ - c.made < kHeaderRing / 2) return c.at;
         c.at = Scratch(now, kHeaderBytes);
         c.made = ring_pos_;
         std::memcpy(c.bytes, now, kHeaderBytes);
@@ -467,6 +483,7 @@ private:
             set(GetCurrentThread(), L"render");
 #else
         port::NameThread("render");
+        port::TakeCore(1);
 #endif
         for (;;) {
             Batch* b;
@@ -477,17 +494,19 @@ private:
                 b = queue_.front();
                 queue_.pop_front();
             }
+            // the time on a CPU for the batch, not each command: on the Switch it is a system call, and two of them
+            // around each of 3000 commands a frame were 6% of the render thread
             auto busy = Clock::now();
+            uint64_t cpu = CpuNs();
             for (const Cmd& c : b->cmds) {
                 auto t = Clock::now();
-                uint64_t cpu = CpuNs();
                 Execute(*b, c);
                 uint64_t ns = Ns(t);
                 op_ns_[size_t(c.op)] += ns;
-                if (cpu) op_cpu_[size_t(c.op)] += CpuNs() - cpu;
                 if (c.op == Op::Present) present_ns_ += ns;
             }
             busy_ns_ += Ns(busy);
+            if (cpu) busy_cpu_ns_ += CpuNs() - cpu;
             uint64_t id = b->id;
             b->cmds.clear();
             b->bytes.clear();
@@ -574,9 +593,10 @@ private:
     uint64_t gpu_wait_ns_ = 0, report_presents_ = 0;
     Clock::time_point report_t_ = Clock::now();
     std::atomic<uint64_t> busy_ns_{0}, present_ns_{0};
-    // each command kind's wall time and time on a CPU: the gap between them is time spent blocked
+    // each command kind's wall time
     static constexpr size_t kOps = size_t(Op::ApplyShadows) + 1;
-    std::array<std::atomic<uint64_t>, kOps> op_ns_{}, op_cpu_{};
+    std::array<std::atomic<uint64_t>, kOps> op_ns_{};
+    std::atomic<uint64_t> busy_cpu_ns_{0};  // the batches' time on a CPU: set against busy_ns_, the rest is blocked
     static uint64_t CpuNs() {
 #ifdef _WIN32
         return 0;
