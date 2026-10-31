@@ -23,7 +23,8 @@ const std::string& Path();
 // sets it from scda.toml's logging before Init: on, the full log; off, no log file at all (stderr still gets it
 // under nxlink)
 bool Verbose();
-void SetLogging(bool on);
+// full: every line, in numbered logs; reports: else only the measurements (Report) and errors, in one log
+void SetLogging(bool full, bool reports = false);
 
 }  // namespace logx
 

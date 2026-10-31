@@ -232,7 +232,7 @@ public:
         uint64_t waited = gpu_wait_ns_;
         for (uint64_t w : wait_ns_) waited += w;
         auto pc = [&](uint64_t ns) { return double(ns) * 100.0 / double(wall); };
-        LOGI("frame time: %.1f ms a frame; the title works %.0f%%, waits for the last frame %.0f%%, the GPU %.0f%%, "
+        LOGR("frame time: %.1f ms a frame; the title works %.0f%%, waits for the last frame %.0f%%, the GPU %.0f%%, "
              "read-backs %.0f%%, flushes %.0f%%; the render thread is busy %.0f%%, presenting %.0f%%",
              double(wall) / 1e6 / double(frames), pc(wall > waited ? wall - waited : 0),
              pc(wait_ns_[size_t(WaitFor::Frame)]), pc(gpu_wait_ns_), pc(wait_ns_[size_t(WaitFor::ReadBack)]),
@@ -249,7 +249,7 @@ public:
                 n += std::snprintf(line + n, sizeof(line) - size_t(n), " %s %.1f/%.1f", kOpNames[i],
                                    double(w) / 1e6 / double(frames), double(c) / 1e6 / double(frames));
         }
-        LOGI("render thread: ms a frame by command, wall/on a CPU:%s", n ? line : " none");
+        LOGR("render thread: ms a frame by command, wall/on a CPU:%s", n ? line : " none");
         wait_ns_ = {};
         gpu_wait_ns_ = 0;
         report_presents_ = presents_;

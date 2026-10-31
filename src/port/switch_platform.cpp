@@ -141,7 +141,7 @@ void SetClocks(u32 cpu_hz, bool docked) {
     bool cpu = SetClock(PcvModuleId_CpuBus, cpu_hz);
     bool gpu = SetClock(PcvModuleId_GPU, docked ? kGpuDocked : kGpuHandheld);
     bool mem = SetClock(PcvModuleId_EMC, docked ? kMemoryDocked : kMemoryHandheld);
-    LOGI("clocks (%s): CPU %u MHz%s, GPU %u MHz%s, memory %u MHz%s", docked ? "docked" : "handheld",
+    LOGR("clocks (%s): CPU %u MHz%s, GPU %u MHz%s, memory %u MHz%s", docked ? "docked" : "handheld",
          ClockRate(PcvModuleId_CpuBus) / 1000000, cpu ? "" : " (not set)", ClockRate(PcvModuleId_GPU) / 1000000,
          gpu ? "" : " (not set)", ClockRate(PcvModuleId_EMC) / 1000000, mem ? "" : " (not set)");
 }

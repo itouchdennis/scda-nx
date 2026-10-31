@@ -52,7 +52,8 @@ bool Relaunched();
 void KeepClocks(uint32_t cpu_mhz);
 // the main thread's event loop: leaves once Relaunch (for the next NRO) or Exit (for the HOME menu) has been called
 void ServiceRelaunch();
-// the perf branch's thread and profiler diagnostics (switch_profile.cpp), while logging is on
+// the perf branch's thread and profiler diagnostics (switch_profile.cpp), while scda.toml's profiling is on
+void SetProfiling(bool on);
 void StartProfiler();
 #endif
 // the arguments this run started with, space separated (--coop-host= and the like, as on Windows)

@@ -1,4 +1,5 @@
-// The perf branch's diagnostics on the Switch, while scda.toml's logging is on:
+// The perf branch's diagnostics on the Switch, while scda.toml's profiling is on; with logging off the log holds the
+// measurements alone (fps, frame time, the render thread, these), which full logging's every line would slow:
 // - every 10 s, each named thread's CPU time over the window and its preferred core, and the cores' sums: whether the
 //   game's thread shares its core with others
 // - a sampling profiler on the busiest threads of the window before: about 500 times a second each is paused, its
@@ -22,9 +23,9 @@ extern "C" char __start__[];
 
 namespace port {
 
-extern bool g_boot_log;
-
 namespace {
+
+bool g_profiling = false;
 
 constexpr u64 kWindowNs = 10'000'000'000;
 constexpr u64 kSampleNs = 2'000'000;  // between rounds of samples
@@ -130,7 +131,7 @@ void Profile(void*) {
     u64 window_start = armTicksToNs(armGetSystemTick());
     for (;;) {
         svcSleepThread(kSampleNs);
-        if (!g_boot_log) continue;
+        if (!g_profiling) continue;
         std::lock_guard lock(g_lock);
         for (Named& n : g_named) {
             if (!n.sampled) continue;
@@ -168,12 +169,15 @@ void ThreadEnded() {
                   g_named.end());
 }
 
+void SetProfiling(bool on) { g_profiling = on; }
+
 void StartProfiler() {
     NameThread("main");
     static Thread t;
     // above the game's threads, so a round of samples is not held up; on core 0 with the main thread's event loop
+    if (!g_profiling) return;
     if (R_SUCCEEDED(threadCreate(&t, Profile, nullptr, nullptr, 0x10000, 0x20, 0))) threadStart(&t);
-    LOGI("perf: profiler on");
+    LOGR("perf: profiler on");
 }
 
 }  // namespace port

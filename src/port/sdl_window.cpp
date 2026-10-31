@@ -450,8 +450,12 @@ void RequestQuit() {
 
 int main(int argc, char** argv) {
     bool logging = app::LoggingWanted();
-    logx::SetLogging(logging);
+    bool profiling = app::ProfilingWanted();
+    logx::SetLogging(logging, profiling);
     port::SetBootLog(logging);
+#ifdef SCDA_SWITCH
+    port::SetProfiling(profiling);
+#endif
     port::Init(argc, argv);
     std::string log = app::Instance() > 1 ? "scda-" + std::to_string(app::Instance()) : "scda";
     logx::Init((app::ExeDir() / "logs").string(), log, port::Relaunched());

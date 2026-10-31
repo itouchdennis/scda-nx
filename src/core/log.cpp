@@ -34,9 +34,9 @@ static bool g_off = false;  // scda.toml's logging off: no file
 
 bool Verbose() { return g_verbose; }
 
-void SetLogging(bool on) {
-    g_verbose = on;
-    g_off = !on;
+void SetLogging(bool full, bool reports) {
+    g_verbose = full;
+    g_off = !full && !reports;
 }
 
 constexpr int kKeep = 30;  // debug logs kept
