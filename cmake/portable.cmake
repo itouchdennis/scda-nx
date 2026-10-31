@@ -64,6 +64,10 @@ if(NOT SCDA_CHECK_ONLY)
     target_include_directories(scda_code PRIVATE src ${GEN})
     separate_arguments(SCDA_CODE_OPT_LIST UNIX_COMMAND "${SCDA_CODE_OPT}")
     target_compile_options(scda_code PRIVATE ${SCDA_CODE_OPT_LIST} -fno-strict-aliasing -w)
+    # link time optimization (SCDA_CODE_OPT with -flto): the link does it, on every core
+    if(SCDA_CODE_OPT MATCHES "-flto")
+        set(SCDA_CODE_LTO ON)
+    endif()
     if(NOT CMAKE_CROSSCOMPILING)
         add_dependencies(scda_code recompile)
     endif()
@@ -175,6 +179,9 @@ target_compile_definitions(scda PRIVATE SCDA_PORT $<$<BOOL:${SCDA_VERBOSE_LOG}>:
     $<$<STREQUAL:${SCDA_GPU},gl>:SCDA_GL> $<$<STREQUAL:${SCDA_GPU},vk>:SCDA_VK>
     $<$<AND:$<STREQUAL:${SCDA_GPU},vk>,$<NOT:$<BOOL:${SCDA_SWITCH}>>>:SCDA_SDL_VULKAN>)
 target_link_libraries(scda PRIVATE tomlplusplus::tomlplusplus SDL2::SDL2 ${GPU_LIBS} Threads::Threads)
+if(SCDA_CODE_LTO)
+    target_link_options(scda PRIVATE -flto=auto)
+endif()
 if(SCDA_SWITCH)
     target_compile_definitions(scda PRIVATE SCDA_SWITCH)
     target_link_options(scda PRIVATE "LINKER:--wrap=SDL_SYS_SetThreadPriority"
