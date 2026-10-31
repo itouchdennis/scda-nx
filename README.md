@@ -243,6 +243,28 @@ Overclocking stays with your own tools, such as [sys-clk](https://github.com/ret
 its clocks again only when the CPU setting changes or the console is docked or taken out, and so does not fight
 them.
 
+### Performance: where it stands, and what is left to try
+Measured on a Switch V1 in handheld mode at 1785 MHz, at a fixed spot (a quicksave in JBA headquarters part 1,
+standing still, 939 draws a frame), with `profiling = true` in `scda.toml`. v0.4.8 brought the frame time from 42.7
+to 40.2 ms (about 6%) with the picture unchanged.
+
+The game's own thread is what limits the frame rate; the GPU waits on it. Of its time about 65% is the recompiled
+game code, 8 to 10% waits on the game's other threads, about 4.5% handing each draw's state to the render thread and
+about 2% indirect calls. The render thread is busy about half the time, so it is not the limit yet.
+
+- [ ] **Link time optimization of the game code.** Built (`SCDA_CODE_OPT="-O3 -flto=auto"`, the code 7% bigger), not
+  measured yet: it inlines across the 128 files of game code, which may save calls or may cost instruction cache.
+- [ ] **Profile guided optimization.** Compile the game code with the counts of a run on the console, so the
+  compiler lays out and inlines by what is actually hot. The profile is flat, which is where this tends to help most.
+- [ ] **Mark the rest of the state.** The vertex shader constants and transforms are compared only where they were
+  written; the render states, material and lights (about 2.7 KB a draw) are still compared in full.
+- [ ] **What the waits are.** Find which of the game's objects its thread waits on, and whether a port side delay
+  (a kernel object, a lock) adds to them.
+- [ ] **The render thread's own costs** (vertex assembly, hashing, copies), once the game's thread is no longer the
+  limit.
+- [ ] **Loading and saving** (not frame rate): the language files are opened hundreds of times while a level
+  loads, and a save is written in 4 KB pieces and read back in thousands of small ones.
+
 ## Changes
 What changed in each release: [CHANGELOG.md](CHANGELOG.md). How to contribute, and the commit message format
 (Conventional Commits): [CONTRIBUTING.md](CONTRIBUTING.md).
