@@ -184,7 +184,7 @@ struct State {
 
 // Every write to the title's State::vsc and to its transforms is marked (xdk/d3d8.cpp, game/hud.cpp), so the threaded
 // backend's hand-over need not compare 3.5 KB of them on each draw. The constants are set before nearly every draw, a
-// few registers at a time: the registers written since the last hand-over, [g_vsc_lo, g_vsc_hi), are what it
+// few registers at a time: the registers written since the last hand-over, [g_vsc_lo, g_vsc_hi), are all of them it
 // compares. The transforms count their writes. The title's thread only.
 inline uint32_t g_vsc_lo = 0, g_vsc_hi = 192;
 inline uint32_t g_transform_writes = 0;
