@@ -270,11 +270,11 @@ public:
         }
         LOGR("render thread: ms a frame by command:%s; on a CPU %.1f ms of them", n ? line : " none",
              double(busy_cpu_ns_.exchange(0)) / 1e6 / double(frames));
-        LOGR("state: of the ranges no write marked, %llu of %llu vsc and %llu of %llu transforms changed all the same",
-             (unsigned long long)marks_missed_[1], (unsigned long long)marks_quiet_[1],
-             (unsigned long long)marks_missed_[2], (unsigned long long)marks_quiet_[2]);
-        marks_missed_ = {};
-        marks_quiet_ = {};
+        LOGR("state: vsc pieces marked %llu, unmarked %llu, of those changed all the same %llu; transforms ranges "
+             "skipped %llu", (unsigned long long)vsc_pieces_[1], (unsigned long long)vsc_pieces_[0],
+             (unsigned long long)vsc_missed_, (unsigned long long)transforms_skipped_);
+        vsc_pieces_ = {};
+        vsc_missed_ = transforms_skipped_ = 0;
         wait_ns_ = {};
         gpu_wait_ns_ = 0;
         report_presents_ = presents_;
@@ -421,26 +421,32 @@ private:
         const uint8_t* now = reinterpret_cast<const uint8_t*>(&s);
         Cmd c{Op::State};
         size_t first = cur_->bytes.size();
-        // the marked ranges are compared all the same for now, and a change their mark missed counted: the check
-        // that has to come out clean before they may go uncompared while unmarked
-        const uint32_t marks[3] = {0, g_vsc_writes, g_transform_writes};
+        // The transforms go uncompared while no write was marked (a check build found every change marked). The
+        // vertex shader constants are compared all the same for now: a 64 byte piece that changed outside the
+        // registers marked is counted, the check that has to come out clean before the rest of them may go.
+        const size_t vsc_at = At(s, &s.vsc);
+        const size_t vsc_lo = vsc_at + size_t(g_vsc_lo) * 16, vsc_hi = vsc_at + size_t(g_vsc_hi) * 16;
         for (const Range& r : ranges_) {
-            bool changed = false;
-            for (size_t off = r.off, end = r.off + r.len; off < end; off += 64)
-                changed |= Delta(reinterpret_cast<const uint8_t*>(&sent_) + off, now + off, std::min<size_t>(64, end - off));
-            size_t m = size_t(r.mark);
-            if (!m) continue;
-            if (marks[m] == marks_seen_[m]) {
-                marks_quiet_[m]++;
-                if (changed) {
-                    marks_missed_[m]++;
-                    LOG_FIRST(16, "state: %s changed with no write marked (range at %zu)", m == 1 ? "vsc" : "transforms",
-                              r.off);
+            if (r.mark == Mark::Transforms && g_transform_writes == transforms_seen_) {
+                transforms_skipped_++;
+                continue;
+            }
+            for (size_t off = r.off, end = r.off + r.len; off < end; off += 64) {
+                size_t n = std::min<size_t>(64, end - off);
+                bool changed = Delta(reinterpret_cast<const uint8_t*>(&sent_) + off, now + off, n);
+                if (r.mark != Mark::Vsc) continue;
+                bool marked = off < vsc_hi && off + n > vsc_lo;
+                vsc_pieces_[marked]++;
+                if (changed && !marked) {
+                    vsc_missed_++;
+                    LOG_FIRST(16, "state: vsc registers %zu..%zu changed outside those marked (%u..%u)",
+                              (off - vsc_at) / 16, (off - vsc_at + n) / 16, g_vsc_lo, g_vsc_hi);
                 }
             }
         }
-        marks_seen_[1] = marks[1];
-        marks_seen_[2] = marks[2];
+        transforms_seen_ = g_transform_writes;
+        g_vsc_lo = 192;
+        g_vsc_hi = 0;
         std::array<uint32_t, 4> textures;
         for (size_t i = 0; i < 4; i++) textures[i] = Header(s.textures[i]);
         Delta(&sent_.textures, &textures, sizeof(textures));
@@ -623,9 +629,11 @@ private:
     // each command kind's wall time
     static constexpr size_t kOps = size_t(Op::ApplyShadows) + 1;
     std::array<std::atomic<uint64_t>, kOps> op_ns_{};
-    // the title's: the marks (state.h) at the last hand-over, and of the ranges unmarked since, how many changed
-    uint32_t marks_seen_[3] = {};
-    std::array<uint64_t, 3> marks_quiet_{}, marks_missed_{};
+    // the title's: the transforms' mark (state.h) at the last hand-over; the vertex shader constants' 64 byte pieces
+    // compared outside and inside the registers marked, and the ones outside that changed (has to stay 0)
+    uint32_t transforms_seen_ = ~0u;  // no hand-over yet: the first compares them
+    std::array<uint64_t, 2> vsc_pieces_{};
+    uint64_t vsc_missed_ = 0, transforms_skipped_ = 0;
     std::atomic<uint64_t> busy_cpu_ns_{0};  // the batches' time on a CPU: set against busy_ns_, the rest is blocked
     static uint64_t CpuNs() {
 #ifdef _WIN32

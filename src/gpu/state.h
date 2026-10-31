@@ -182,9 +182,15 @@ struct State {
     float zscale = 16777215.0f;  // depth buffer units per 1.0
 };
 
-// Bumped by every write to the title's State::vsc and to its transforms (xdk/d3d8.cpp, game/hud.cpp): the threaded
-// backend's hand-over need not compare 3.5 KB of them on each draw when neither moved. The title's thread only.
-inline uint32_t g_vsc_writes = 0;
+// Every write to the title's State::vsc and to its transforms is marked (xdk/d3d8.cpp, game/hud.cpp), so the threaded
+// backend's hand-over need not compare 3.5 KB of them on each draw. The constants are set before nearly every draw, a
+// few registers at a time: the registers written since the last hand-over, [g_vsc_lo, g_vsc_hi), are what it
+// compares. The transforms count their writes. The title's thread only.
+inline uint32_t g_vsc_lo = 0, g_vsc_hi = 192;
 inline uint32_t g_transform_writes = 0;
+inline void MarkVsc(uint32_t first, uint32_t count) {
+    g_vsc_lo = first < g_vsc_lo ? first : g_vsc_lo;
+    g_vsc_hi = first + count > g_vsc_hi ? (first + count < 192 ? first + count : 192) : g_vsc_hi;
+}
 
 }  // namespace gpu
