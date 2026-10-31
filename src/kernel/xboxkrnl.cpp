@@ -244,10 +244,12 @@ KERNEL_EXPORT(99, KeDelayExecutionThread, 3) {
         std::this_thread::yield();
         return kSuccess;
     }
+    // an alertable sleep in 2 ms slices, so the APCs queued meanwhile run soon; any other in one go (in slices it woke
+    // a core about a thousand times a second for nothing)
     while (now() < deadline) {
         int64_t left = deadline - now();
         g_sleep_slices.fetch_add(1, std::memory_order_relaxed);
-        std::this_thread::sleep_for(std::chrono::nanoseconds(std::min<int64_t>(left, 2000000)));
+        std::this_thread::sleep_for(std::chrono::nanoseconds(alertable ? std::min<int64_t>(left, 2000000) : left));
         if (alertable && t && RunApcs(*t)) return kUserApc;
     }
     return kSuccess;

@@ -253,15 +253,17 @@ uint32_t Wait(const std::vector<ObjectRef>& objs, bool wait_all, int64_t timeout
                 return kUserApc;
             }
         }
+        // bounded so alertable waits notice new APCs; the others only as a safety net (every 50 ms they woke a core
+        // about 450 times a second, all waiting threads together)
+        const int64_t bound = alertable ? 50000000 : 1000000000;
         if (!infinite) {
             int64_t now = duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
             if (now >= deadline) return kTimeout;
             if (!queued.on) queued.Add();
-            // bounded so alertable waits notice new APCs
-            queued.w.cv.wait_for(lock, nanoseconds(std::min<int64_t>(deadline - now, 50000000)));
+            queued.w.cv.wait_for(lock, nanoseconds(std::min<int64_t>(deadline - now, bound)));
         } else {
             if (!queued.on) queued.Add();
-            queued.w.cv.wait_for(lock, milliseconds(50));
+            queued.w.cv.wait_for(lock, nanoseconds(bound));
         }
         g_wait_wakes.fetch_add(1, std::memory_order_relaxed);
     }

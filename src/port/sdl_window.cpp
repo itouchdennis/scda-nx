@@ -364,7 +364,10 @@ void Pace() {
     auto period = std::chrono::nanoseconds(1000000000ull / cap);
     next += period;
     if (next < now - period) next = now;
-    while (clock::now() + std::chrono::milliseconds(2) < next) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    // one sleep to just before the frame's time, then a short spin: sleeping a millisecond at a time and spinning the
+    // last two woke a core about a thousand times a second and kept it busy 4.5% of the time at 30 fps
+    constexpr auto kSpin = std::chrono::microseconds(300);
+    if (clock::now() + kSpin < next) std::this_thread::sleep_for(next - kSpin - clock::now());
     auto spin = clock::now();
     while (clock::now() < next) std::this_thread::yield();
     port::g_pace_spin_ns.fetch_add(uint64_t((clock::now() - spin).count()), std::memory_order_relaxed);
