@@ -39,6 +39,7 @@ respective owners.
   - [5. Your game files](#5-your-game-files)
   - [6. The NRO](#6-the-nro)
   - [7. On the Switch](#7-on-the-switch)
+- [To do](#to-do)
 - [Changes](#changes)
 - [Credits](#credits)
 
@@ -189,6 +190,31 @@ Logging is off by default. To write the full log (and `boot.txt`) to `sdmc:/swit
 for example, add `logging = true` to `sdmc:/switch/scda/scda.toml`. A crash still writes `crash.txt` either way.
 
 What it took and the traps found on the way are in [PORTING_GUIDE.md](PORTING_GUIDE.md).
+
+## To do
+### Optimize battery: dynamic clocks
+The port runs the Switch at Nintendo's official clocks: CPU 1020 MHz, GPU 384 MHz handheld or 768 MHz docked,
+memory 1331 MHz handheld or 1600 MHz docked. *CPU Clock* (Recomp Settings > Display) raises the CPU up to boost
+mode's 1785 MHz, and *Max Frame Rate* caps the game at 30 or 60. The game's own code is what limits the frame rate,
+so a higher CPU clock buys frames and costs battery, whether a frame needs it or not. The plan:
+
+- [ ] **Measure idle spinning first.** Some of the game's threads may wait with `Sleep(0)`, which only yields and
+  keeps a core awake while nothing happens. A counter in the log will show whether that matters, and if it does,
+  those waits become real sleeps.
+- [ ] **`AUTO` CPU clock.** A small governor picks the clock from how busy the game's thread is each frame (the port
+  measures it already, "the title works X%" in the log). With time to spare the clock steps down; when a frame gets
+  tight or is missed it steps straight back up. It goes up fast and down slowly, checked every one or two seconds,
+  with a margin so that a sudden heavy scene does not stutter. At 30 fps that should keep the CPU between 1020 and
+  1428 MHz most of the time instead of at a fixed clock.
+- [ ] **Low clocks where nothing happens.** The pause menu, the main menu, briefing videos and the recomp settings
+  need little CPU: 1020 MHz there, whatever the setting. Loading screens keep the high clock, because unpacking the
+  level is CPU work and loads faster with it.
+- [ ] **Shorter waits in the frame rate cap.** The cap spins for the last 2 ms of each frame to hit its time exactly;
+  0.5 ms is likely enough.
+
+Overclocking stays with your own tools, such as [sys-clk](https://github.com/retronx-team/sys-clk): the port sets
+its clocks again only when the CPU setting changes or the console is docked or taken out, and so does not fight
+them.
 
 ## Changes
 What changed in each release: [CHANGELOG.md](CHANGELOG.md). How to contribute, and the commit message format
