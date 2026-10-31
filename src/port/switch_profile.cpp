@@ -137,6 +137,55 @@ Sample Take(Handle h) {
     return s;
 }
 
+// Allocation sampling: one heap call in kAllocEvery, its thread and the return addresses on its stack (who asked),
+// in a fixed table: the counting may not allocate itself. Each window logs the busiest call chains.
+constexpr u32 kAllocEvery = 32;
+constexpr size_t kAllocSites = 1024;
+constexpr size_t kAllocFrames = 5;
+struct AllocSite {
+    u64 key = 0;
+    u32 count = 0;
+    Handle thread = INVALID_HANDLE;
+    u32 frames[kAllocFrames] = {};
+};
+AllocSite g_alloc_sites[kAllocSites];
+Mutex g_alloc_lock = 0;
+std::atomic<u32> g_alloc_tick{0};
+std::atomic<u64> g_alloc_calls{0};
+
+void SampleAlloc() {
+    g_alloc_calls.fetch_add(1, std::memory_order_relaxed);
+    if (g_alloc_tick.fetch_add(1, std::memory_order_relaxed) % kAllocEvery || !g_text) return;
+    // the return addresses above this frame, within this thread's stack
+    u32 frames[kAllocFrames] = {};
+    size_t n = 0;
+    u64 sp = reinterpret_cast<u64>(__builtin_frame_address(0));
+    MemoryInfo mi{};
+    u32 pi = 0;
+    if (R_FAILED(svcQueryMemory(&mi, &pi, sp))) return;
+    u64 end = std::min(mi.addr + mi.size, sp + 1024);
+    for (u64 at = sp & ~7ull; at + 8 <= end && n < kAllocFrames; at += 8) {
+        u64 v = *reinterpret_cast<const u64*>(at);
+        if (IsReturn(v)) frames[n++] = Bucket(v);
+    }
+    Handle thread = threadGetCurHandle();
+    u64 key = u64(thread) * 0x9E3779B97F4A7C15ull;
+    for (size_t i = 0; i < n; i++) key = (key ^ frames[i]) * 0x100000001B3ull;
+    mutexLock(&g_alloc_lock);
+    for (size_t i = 0; i < kAllocSites; i++) {
+        AllocSite& s = g_alloc_sites[(key + i) % kAllocSites];
+        if (s.count && s.key != key) continue;
+        if (!s.count) {
+            s.key = key;
+            s.thread = thread;
+            std::memcpy(s.frames, frames, sizeof(frames));
+        }
+        s.count++;
+        break;
+    }
+    mutexUnlock(&g_alloc_lock);
+}
+
 void WriteCounts(FILE* f, const char* what, const std::string& name, const std::unordered_map<u32, u32>& counts) {
     std::vector<std::pair<u32, u32>> v(counts.begin(), counts.end());
     std::sort(v.begin(), v.end(), [](auto& a, auto& b) { return a.second > b.second; });
@@ -178,6 +227,30 @@ void EndWindow(u64 window_ns) {
     LOGR("perf: cores 0 1 2 asked for %.0f%% %.0f%% %.0f%% by the named threads, %u samples refused", cores[0] * 100,
          cores[1] * 100, cores[2] * 100, g_failed.exchange(0));
     LOGR("perf: files, %s", kernel::TakeFileStats().c_str());
+    // the window's allocations, and the call chains sampled most, by thread
+    static AllocSite sites[kAllocSites];
+    mutexLock(&g_alloc_lock);
+    std::memcpy(sites, g_alloc_sites, sizeof(sites));
+    std::memset(g_alloc_sites, 0, sizeof(g_alloc_sites));
+    mutexUnlock(&g_alloc_lock);
+    std::sort(std::begin(sites), std::end(sites), [](const AllocSite& a, const AllocSite& b) { return a.count > b.count; });
+    double seconds = double(window_ns) / 1e9;
+    LOGR("perf: heap calls %.0f a second", double(g_alloc_calls.exchange(0)) / seconds);
+    // what the process may use and uses: the room a RAM cache would have
+    u64 total = 0, used = 0;
+    svcGetInfo(&total, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
+    svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
+    LOGR("perf: memory %llu MB of %llu MB used", (unsigned long long)(used >> 20), (unsigned long long)(total >> 20));
+    for (size_t i = 0; i < 12 && sites[i].count; i++) {
+        const char* who = "?";
+        for (Named& n : g_named)
+            if (n.handle == sites[i].thread) who = n.name.c_str();
+        char chain[96] = "";
+        int at = 0;
+        for (size_t f = 0; f < kAllocFrames && sites[i].frames[f]; f++)
+            at += std::snprintf(chain + at, sizeof(chain) - size_t(at), " %X", sites[i].frames[f]);
+        LOGR("perf:   ~%.0f a second by %s from%s", double(sites[i].count) * kAllocEvery / seconds, who, chain);
+    }
     // the window's top places of each sampled thread, then the next window's threads
     for (Named& n : g_named) {
         if (!n.sampled || n.window.empty()) continue;
@@ -269,3 +342,28 @@ void StartProfiler() {
 }
 
 }  // namespace port
+
+// the heap's entry points, counted while profiling (portable.cmake wraps them for the Switch build)
+extern "C" {
+void* __real_malloc(size_t n);
+void* __real_calloc(size_t count, size_t n);
+void* __real_realloc(void* p, size_t n);
+void* __real_memalign(size_t align, size_t n);
+
+void* __wrap_malloc(size_t n) {
+    if (port::g_profiling) port::SampleAlloc();
+    return __real_malloc(n);
+}
+void* __wrap_calloc(size_t count, size_t n) {
+    if (port::g_profiling) port::SampleAlloc();
+    return __real_calloc(count, n);
+}
+void* __wrap_realloc(void* p, size_t n) {
+    if (port::g_profiling) port::SampleAlloc();
+    return __real_realloc(p, n);
+}
+void* __wrap_memalign(size_t align, size_t n) {
+    if (port::g_profiling) port::SampleAlloc();
+    return __real_memalign(align, n);
+}
+}

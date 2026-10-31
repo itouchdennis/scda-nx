@@ -174,7 +174,9 @@ if(SCDA_SWITCH)
     target_compile_definitions(scda PRIVATE SCDA_SWITCH)
     target_link_options(scda PRIVATE "LINKER:--wrap=SDL_SYS_SetThreadPriority"
         "LINKER:--wrap=threadCreate" "LINKER:--wrap=threadClose"
-        "LINKER:--wrap=condvarWaitTimeout")
+        "LINKER:--wrap=condvarWaitTimeout"
+        # the perf diagnostics' allocation sampling (switch_profile.cpp)
+        "LINKER:--wrap=malloc" "LINKER:--wrap=calloc" "LINKER:--wrap=realloc" "LINKER:--wrap=memalign")
 endif()
 if(SCDA_SWITCH AND NOT SCDA_CHECK_ONLY)
     # the NRO for hbmenu: sdmc:/switch/scda/scda.nro
