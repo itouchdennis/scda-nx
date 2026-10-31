@@ -232,6 +232,27 @@ void EndWindow(u64 window_ns) {
     LOGR("perf: cores 0 1 2 asked for %.0f%% %.0f%% %.0f%% by the named threads, %u samples refused", cores[0] * 100,
          cores[1] * 100, cores[2] * 100, g_failed.exchange(0));
     LOGR("perf: files, %s", kernel::TakeFileStats().c_str());
+    // the battery: its charge to a thousandth of a percent, and how fast it went over the window and since the first
+    // one, in percent an hour (the Switch gives no current); charging makes the rates meaningless
+    static bool psm = R_SUCCEEDED(psmInitialize());
+    static double first_charge = -1, last_charge = -1;
+    static u64 first_at = 0;
+    double charge = 0;
+    PsmChargerType charger = PsmChargerType_Unconnected;
+    if (psm && R_SUCCEEDED(psmGetRawBatteryChargePercentage(&charge))) {
+        psmGetChargerType(&charger);
+        u64 at = armTicksToNs(armGetSystemTick());
+        if (first_charge < 0 || charger != PsmChargerType_Unconnected) {
+            first_charge = charge;
+            first_at = at;
+        }
+        double hours = double(at - first_at) / 3.6e12;
+        LOGR("perf: battery %.3f%%, %.1f%% an hour over the window, %.1f%% an hour over %.0f s%s", charge,
+             last_charge >= 0 ? (last_charge - charge) * 3.6e12 / double(window_ns) : 0.0,
+             hours > 0 ? (first_charge - charge) / hours : 0.0, double(at - first_at) / 1e9,
+             charger != PsmChargerType_Unconnected ? " (charging, not counted)" : "");
+        last_charge = charge;
+    }
     // waiting that keeps a core busy or wakes it for nothing: what the battery pays without a frame for it
     auto rate = [&](std::atomic<uint64_t>& n) { return double(n.exchange(0)) * 1e9 / double(window_ns); };
     auto ms = [&](std::atomic<uint64_t>& ns) { return double(ns.exchange(0)) / 1e6 * 1e9 / double(window_ns); };
