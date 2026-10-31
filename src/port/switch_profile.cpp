@@ -3,8 +3,9 @@
 // - every 10 s, each named thread's CPU time over the window and its preferred core, and the cores' sums: whether the
 //   game's thread shares its core with others
 // - a sampling profiler on the busiest threads of the window before: about 500 times a second each is paused, its
-//   program counter counted, and let go. A thread in a system call (the instruction before its program counter an
-//   svc) has its return address counted too: who made the call. logs/profile.txt holds the counts of the whole run
+//   program counter counted, and let go. A thread in a system call (an svc at or just before its program counter)
+//   has its return address counted too, and every return address on its stack: who made the call, and the calls
+//   that led there. logs/profile.txt holds the counts of the whole run
 //   (offsets into scda.elf from the module's base, which addr2line or nm turn into functions), the log the top ones
 //   of each window.
 #include <switch.h>
@@ -42,13 +43,18 @@ struct Named {
     bool sampled = false;
     std::unordered_map<u32, u32> window;  // bucket offset to samples, this window
     std::unordered_map<u32, u32> callers;  // of the samples in a system call: the caller's bucket, this window
+    std::unordered_map<u32, u32> stacks;   // and the return addresses on their stacks, each once a sample
 };
 
 std::mutex g_lock;
 std::vector<Named> g_named;
 std::unordered_map<std::string, std::unordered_map<u32, u32>> g_run;  // by thread name, the whole run
 std::unordered_map<std::string, std::unordered_map<u32, u32>> g_run_callers;
+std::unordered_map<std::string, std::unordered_map<u32, u32>> g_run_stacks;
 u64 g_base = 0;  // the module's: where scda.elf's address 0 is
+u64 g_text = 0;  // its code's size
+constexpr u64 kStackScan = 4096;  // bytes of a stack searched for return addresses
+constexpr size_t kStackFrames = 24;
 std::atomic<u32> g_failed{0};  // samples the kernel refused
 
 u64 Ticks(Handle h) {
@@ -65,34 +71,69 @@ int PreferredCore(Handle h) {
 struct Sample {
     u64 pc = 0;
     u64 lr = 0;
+    bool svc = false;
+    size_t frames = 0;
+    u32 stack[kStackFrames];  // return addresses' buckets, a system call's only
 };
 
-// the thread paused, its program counter and return address read, and let go; pc 0 when the kernel would not
-Sample Take(Handle h) {
-    if (R_FAILED(svcSetThreadActivity(h, ThreadActivity_Paused))) return {};
-    ThreadContext ctx{};
-    Result rc = svcGetThreadContext3(&ctx, h);
-    svcSetThreadActivity(h, ThreadActivity_Runnable);
-    if (R_FAILED(rc)) return {};
-    return {ctx.pc.x, ctx.lr};
-}
-
-// the module's base: the start of the code region this function is in (an NRO's text begins at its address 0)
-u64 ModuleBase() {
+// the module's code: the region this function is in (an NRO's text begins at its address 0)
+void FindModule() {
     MemoryInfo mi{};
     u32 pi = 0;
-    if (R_FAILED(svcQueryMemory(&mi, &pi, reinterpret_cast<u64>(&ModuleBase)))) return 0;
-    return mi.addr;
+    if (R_FAILED(svcQueryMemory(&mi, &pi, reinterpret_cast<u64>(&FindModule)))) return;
+    g_base = mi.addr;
+    g_text = mi.size;
 }
 
-bool InModule(u64 pc) { return pc >= g_base && pc - g_base < 0x80000000ull; }
+bool InModule(u64 pc) { return pc - g_base < g_text; }
 
-// an AArch64 svc #imm: the thread stopped in a system call
-bool AfterSvc(u64 pc) {
-    if (pc - g_base < 4) return false;
+u32 Insn(u64 at) {
     u32 insn = 0;
-    std::memcpy(&insn, reinterpret_cast<const void*>(pc - 4), 4);
-    return (insn & 0xFFE0001F) == 0xD4000001;
+    std::memcpy(&insn, reinterpret_cast<const void*>(at), 4);
+    return insn;
+}
+
+bool IsSvc(u32 insn) { return (insn & 0xFFE0001F) == 0xD4000001; }
+
+// a thread in a system call: the kernel gives the svc's own address for one blocked there, the next for one let go
+bool InSvc(u64 pc) { return IsSvc(Insn(pc)) || (pc - g_base >= 4 && IsSvc(Insn(pc - 4))); }
+
+// an address a bl or blr returns to
+bool IsReturn(u64 v) {
+    if (!InModule(v) || v & 3 || v - g_base < 4) return false;
+    u32 insn = Insn(v - 4);
+    return (insn & 0xFC000000) == 0x94000000 || (insn & 0xFFFFFC1F) == 0xD63F0000;
+}
+
+u32 Bucket(u64 at) { return u32((at - g_base) / kBucket * kBucket); }
+
+// the return addresses on a paused thread's stack, from sp up to the end of its stack's region
+void ScanStack(u64 sp, Sample& s) {
+    MemoryInfo mi{};
+    u32 pi = 0;
+    if (!sp || R_FAILED(svcQueryMemory(&mi, &pi, sp)) || !(mi.perm & Perm_R)) return;
+    u64 end = std::min(mi.addr + mi.size, sp + kStackScan);
+    for (u64 at = sp & ~7ull; at + 8 <= end && s.frames < kStackFrames; at += 8) {
+        u64 v = *reinterpret_cast<const u64*>(at);
+        if (!IsReturn(v)) continue;
+        u32 b = Bucket(v);
+        if (std::find(s.stack, s.stack + s.frames, b) == s.stack + s.frames) s.stack[s.frames++] = b;
+    }
+}
+
+// the thread paused, where it was read (and its stack, in a system call), and let go; pc 0 when the kernel would not
+Sample Take(Handle h) {
+    Sample s;
+    if (R_FAILED(svcSetThreadActivity(h, ThreadActivity_Paused))) return s;
+    ThreadContext ctx{};
+    if (R_SUCCEEDED(svcGetThreadContext3(&ctx, h)) && InModule(ctx.pc.x)) {
+        s.pc = ctx.pc.x;
+        s.lr = ctx.lr;
+        s.svc = InSvc(s.pc);
+        if (s.svc) ScanStack(ctx.sp, s);
+    }
+    svcSetThreadActivity(h, ThreadActivity_Runnable);
+    return s;
 }
 
 void WriteCounts(FILE* f, const char* what, const std::string& name, const std::unordered_map<u32, u32>& counts) {
@@ -108,9 +149,11 @@ void WriteRun() {
     if (!f) return;
     std::fprintf(f, "# offsets into scda.elf (%u byte buckets), samples; module base %llX\n", kBucket,
                  (unsigned long long)g_base);
-    std::fprintf(f, "# thread: where it was; callers: who made the system call it was in\n");
+    std::fprintf(f, "# thread: where it was; callers: who made the system call it was in; stacks: the return addresses "
+                    "on the stack in a system call, each once a sample\n");
     for (auto& [name, counts] : g_run) WriteCounts(f, "thread", name, counts);
     for (auto& [name, counts] : g_run_callers) WriteCounts(f, "callers", name, counts);
+    for (auto& [name, counts] : g_run_stacks) WriteCounts(f, "stacks", name, counts);
     std::fclose(f);
 }
 
@@ -151,8 +194,11 @@ void EndWindow(u64 window_ns) {
         for (auto& [off, c] : v) run[off] += c;
         auto& callers = g_run_callers[n.name];
         for (auto& [off, c] : n.callers) callers[off] += c;
+        auto& stacks = g_run_stacks[n.name];
+        for (auto& [off, c] : n.stacks) stacks[off] += c;
         n.window.clear();
         n.callers.clear();
+        n.stacks.clear();
     }
     std::sort(by_share.begin(), by_share.end(), [](Named* a, Named* b) { return a->share > b->share; });
     for (Named& n : g_named) n.sampled = false;
@@ -170,12 +216,14 @@ void Profile(void*) {
         for (Named& n : g_named) {
             if (!n.sampled) continue;
             Sample s = Take(n.handle);
-            if (!InModule(s.pc)) {
+            if (!s.pc) {
                 g_failed++;
                 continue;
             }
-            n.window[u32((s.pc - g_base) / kBucket * kBucket)]++;
-            if (AfterSvc(s.pc) && InModule(s.lr)) n.callers[u32((s.lr - g_base) / kBucket * kBucket)]++;
+            n.window[Bucket(s.pc)]++;
+            if (!s.svc) continue;
+            if (InModule(s.lr)) n.callers[Bucket(s.lr)]++;
+            for (size_t i = 0; i < s.frames; i++) n.stacks[s.stack[i]]++;
         }
         u64 now = armTicksToNs(armGetSystemTick());
         if (now - window_start >= kWindowNs) {
@@ -211,9 +259,10 @@ void StartProfiler() {
     static Thread t;
     // above the game's threads, so a round of samples is not held up; on core 0 with the main thread's event loop
     if (!g_profiling) return;
-    g_base = ModuleBase();
+    FindModule();
     if (R_SUCCEEDED(threadCreate(&t, Profile, nullptr, nullptr, 0x10000, 0x20, 0))) threadStart(&t);
-    LOGR("perf: profiler on, module base %llX", (unsigned long long)g_base);
+    LOGR("perf: profiler on, module base %llX, %llu MB of code", (unsigned long long)g_base,
+         (unsigned long long)(g_text >> 20));
 }
 
 }  // namespace port
