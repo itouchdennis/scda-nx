@@ -39,6 +39,7 @@ respective owners.
   - [5. Your game files](#5-your-game-files)
   - [6. The NRO](#6-the-nro)
   - [7. On the Switch](#7-on-the-switch)
+- [Clocks and overclocking](#clocks-and-overclocking)
 - [To do](#to-do)
 - [Changes](#changes)
 - [Credits](#credits)
@@ -190,6 +191,32 @@ Logging is off by default. To write the full log (and `boot.txt`) to `sdmc:/swit
 for example, add `logging = true` to `sdmc:/switch/scda/scda.toml`. A crash still writes `crash.txt` either way.
 
 What it took and the traps found on the way are in [PORTING_GUIDE.md](PORTING_GUIDE.md).
+
+## Clocks and overclocking
+The port runs the Switch at Nintendo's official clocks for games, no boost mode and no overclock:
+
+|        | Handheld | Docked   |
+|:------:|:--------:|:--------:|
+| CPU    | 1020 MHz | 1020 MHz |
+| GPU    | 384 MHz  | 768 MHz  |
+| Memory | 1331 MHz | 1600 MHz |
+
+*CPU Clock* (Recomp Settings > Display) raises the CPU up to boost mode's 1785 MHz (1224, 1428, 1581 or 1785). Docking
+or undocking resets the clocks, so the port sets them again when the console changes mode and when the CPU setting
+changes, and leaves them alone otherwise.
+
+The game's own code limits the frame rate, so the CPU clock is what buys frames. Overclocking is left to your own
+tools, such as [sys-clk](https://github.com/retronx-team/sys-clk) with a profile for the title you start the port
+from. Tested and recommended in handheld mode:
+
+|        | Handheld |
+|:------:|:--------:|
+| CPU    | 1428 MHz |
+| GPU    | 460 MHz  |
+| Memory | 1600 MHz |
+
+Higher clocks drain the battery faster and warm the console. When you dock or undock, or change *CPU Clock* in
+game, the port sets its own clocks once; sys-clk sets its profile again on its next pass.
 
 ## To do
 ### Optimize battery: dynamic clocks

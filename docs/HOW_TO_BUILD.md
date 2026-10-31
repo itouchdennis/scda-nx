@@ -66,7 +66,12 @@ are saved on the SD card and load at once from then on.
 - **Buttons and gyro:** by default A confirms and B goes back, as on the Switch (Recomp Settings > General). Gyro
   aiming is off until you turn it on under Recomp Settings > Controller > Gyro.
 - **Logs for a bug report:** add `logging = true` to `sdmc:/switch/scda/scda.toml`; the log is written to
-  `sdmc:/switch/scda/logs/`.
+  `sdmc:/switch/scda/logs/`. `profiling = true` writes performance measurements instead (frame time, threads,
+  where the time goes) without the full log.
+- **Clocks:** the port runs Nintendo's official clocks. *CPU Clock* (Recomp Settings > Display) and *Max Frame Rate*
+  (30 or 60) trade frame rate against battery; overclocking is up to tools such as sys-clk (see the README).
+- **Game code optimization:** `-O3` by default. `SCDA_CODE_OPT=-O2` before the script builds it as before, for
+  comparing; a change rebuilds the game code.
 - **Tested** only the single player campaign, on a first-model Switch (V1), handheld, with a light overclock. The
   NRO was built with the Linux builders; the Windows builder has not been tested yet.
 - **macOS** may work with Docker Desktop too, but it has not been tested (and on Apple Silicon it runs emulated and slowly).

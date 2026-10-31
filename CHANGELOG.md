@@ -2,6 +2,24 @@
 There are no prebuilt NROs in any release: each release holds the source and the build scripts. You build the NRO
 yourself, from your own copy of the game ([docs/HOW_TO_BUILD.md](docs/HOW_TO_BUILD.md)).
 
+## v0.4.8
+- **Faster on the Switch, the picture unchanged:** about 6% less frame time at a fixed spot (JBA headquarters part 1,
+  standing, 939 draws a frame: 42.7 to 40.2 ms), from measuring where the time goes on the console:
+  - the game code is optimized at `-O3` instead of `-O2` (3.4% of it); `SCDA_CODE_OPT=-O2` builds it as before;
+  - the game's thread and the render thread each have a core of their own; they often shared one while another
+    stood idle;
+  - handing a draw's state to the render thread compares only what was written: the vertex shader constants by
+    the registers set, the transforms by their writes (two check builds found every change marked);
+  - the render thread makes about 100,000 fewer heap calls a second and measures its time once a batch;
+  - files are read and written through their buffers instead of seeking before every call.
+- **Clocks:** Nintendo's official clocks for games (CPU 1020, GPU 384 handheld or 768 docked, memory 1331 handheld
+  or 1600 docked MHz), set again on docking and undocking. *CPU Clock* (Recomp Settings > Display) picks 1020 to
+  1785 MHz. Overclocking stays with tools such as sys-clk; the README gives tested handheld values.
+- **Max Frame Rate on the Switch:** 30 or 60.
+- **Performance measurements:** `profiling = true` in `scda.toml` logs the frame time, the threads and their cores,
+  where the time goes (a sampling profiler, `logs/profile.txt`), file and heap activity, without the full log.
+- README: clocks and overclocking, and a to-do list.
+
 ## v0.4.7
 - **Aiming on the Switch turns as fast on a diagonal as straight along an axis.** The game cuts a dead zone off each
   stick axis, made for the Xbox's sticks; on the Switch's round sticks that made the camera fast only straight left,
