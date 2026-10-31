@@ -225,10 +225,12 @@ memory 1331 MHz handheld or 1600 MHz docked. *CPU Clock* (Recomp Settings > Disp
 mode's 1785 MHz, and *Max Frame Rate* caps the game at 30 or 60. The game's own code is what limits the frame rate,
 so a higher CPU clock buys frames and costs battery, whether a frame needs it or not. The plan:
 
-- [ ] **Measure idle spinning first.** Some of the game's threads may wait with `Sleep(0)`, which only yields and
-  keeps a core awake while nothing happens. A counter in the log will show whether that matters, and if it does,
-  those waits become real sleeps.
-- [ ] **`AUTO` CPU clock.** A small governor picks the clock from how busy the game's thread is each frame (the port
+- [x] **Measure idle spinning first.** No `Sleep(0)` and no busy stalls, but sleeps in 2 ms slices and waits
+  waking every 50 ms woke the cores about 1,400 times a second. They sleep in one go now (about 180 a second). The
+  battery drained the same with and without (about 25% an hour at 30 fps, measured with `profiling = true`): where
+  the game cannot hold its frame rate it never idles, and the clocks, the screen and the GPU are what drain it.
+- [ ] **`AUTO` CPU clock** (only where frames have time to spare: menus, light scenes, a high clock under a 30 fps
+  cap). A small governor picks the clock from how busy the game's thread is each frame (the port
   measures it already, "the title works X%" in the log). With time to spare the clock steps down; when a frame gets
   tight or is missed it steps straight back up. It goes up fast and down slowly, checked every one or two seconds,
   with a margin so that a sudden heavy scene does not stutter. At 30 fps that should keep the CPU between 1020 and
@@ -236,8 +238,8 @@ so a higher CPU clock buys frames and costs battery, whether a frame needs it or
 - [ ] **Low clocks where nothing happens.** The pause menu, the main menu, briefing videos and the recomp settings
   need little CPU: 1020 MHz there, whatever the setting. Loading screens keep the high clock, because unpacking the
   level is CPU work and loads faster with it.
-- [ ] **Shorter waits in the frame rate cap.** The cap spins for the last 2 ms of each frame to hit its time exactly;
-  0.5 ms is likely enough.
+- [x] **Shorter waits in the frame rate cap.** One sleep to 0.3 ms before the frame's time, then a spin of those
+  only, instead of a millisecond at a time and a spin of the last 2 ms.
 
 Overclocking stays with your own tools, such as [sys-clk](https://github.com/retronx-team/sys-clk): the port sets
 its clocks again only when the CPU setting changes or the console is docked or taken out, and so does not fight
