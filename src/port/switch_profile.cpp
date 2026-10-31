@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "core/log.h"
+#include "kernel/kernel.h"
 #include "port/port.h"
 
 namespace port {
@@ -176,6 +177,7 @@ void EndWindow(u64 window_ns) {
     }
     LOGR("perf: cores 0 1 2 asked for %.0f%% %.0f%% %.0f%% by the named threads, %u samples refused", cores[0] * 100,
          cores[1] * 100, cores[2] * 100, g_failed.exchange(0));
+    LOGR("perf: files, %s", kernel::TakeFileStats().c_str());
     // the window's top places of each sampled thread, then the next window's threads
     for (Named& n : g_named) {
         if (!n.sampled || n.window.empty()) continue;
@@ -260,6 +262,7 @@ void StartProfiler() {
     // above the game's threads, so a round of samples is not held up; on core 0 with the main thread's event loop
     if (!g_profiling) return;
     FindModule();
+    kernel::EnableFileStats();
     if (R_SUCCEEDED(threadCreate(&t, Profile, nullptr, nullptr, 0x10000, 0x20, 0))) threadStart(&t);
     LOGR("perf: profiler on, module base %llX, %llu MB of code", (unsigned long long)g_base,
          (unsigned long long)(g_text >> 20));

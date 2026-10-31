@@ -179,6 +179,11 @@ std::vector<ThreadRef> Threads();
 
 // files
 void MountDefaults(const std::string& game_dir, const std::string& data_dir);
+// files.cpp: every open file's buffered writes onto the card (the title is leaving)
+void FlushFiles();
+// files.cpp, for the port's profiler: what the title did with its files since the last call, the busiest first
+void EnableFileStats();
+std::string TakeFileStats();
 bool CreateSymbolicLink(const std::string& link, const std::string& target);
 bool DeleteSymbolicLink(const std::string& link);
 std::string QuerySymbolicLink(const std::string& link);

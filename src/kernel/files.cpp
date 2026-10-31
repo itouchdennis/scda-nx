@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
@@ -94,6 +95,10 @@ struct File : Object {
     size_t next = 0;
     bool listed = false;
     bool delete_on_close = false;
+    // where fp stands after the last NtReadFile or NtWriteFile (~0 unknown), which of the two it was, and g_moved then
+    uint64_t at = ~0ull;
+    int io = 0;
+    uint64_t moved = 0;
     File() : Object(ObjType::File) {}
     ~File() override {
         if (fp) {
@@ -117,6 +122,46 @@ uint64_t ToFileTime(fs::file_time_type t) {
     using namespace std::chrono;
     auto sys = time_point_cast<nanoseconds>(t - fs::file_time_type::clock::now() + system_clock::now());
     return uint64_t(sys.time_since_epoch().count() / 100 + 116444736000000000ll);
+}
+
+// bumped wherever a stream's position moves outside NtReadFile and NtWriteFile: they seek again then
+std::atomic<uint64_t> g_moved{0};
+
+// fp to pos for a read (io 1) or a write (2). A seek empties newlib's buffer: one before every call made each of the
+// title's writes an SD card write of its own, and each read refill its buffer. C wants one between a write and a
+// read all the same.
+void SeekFor(File& f, uint64_t pos, int io) {
+    uint64_t moved = g_moved.load();
+    if (f.at == pos && f.io == io && f.moved == moved) return;
+    std::fseek(f.fp, long(pos), SEEK_SET);
+    f.io = io;
+    f.moved = moved;
+}
+
+// perf diagnostics, while the port's profiler asks for them: what the title did with each file this window
+struct FileStat {
+    bool disc = false;
+    uint32_t opens = 0, misses = 0, queries = 0, reads = 0, writes = 0;
+    uint64_t read_bytes = 0, write_bytes = 0;
+};
+std::atomic<bool> g_stats_on{false};
+std::mutex g_stats_mu;
+std::map<std::string, FileStat> g_stats;
+
+template <class Fn>
+void Count(const std::string& xbox, bool disc, Fn&& fn) {
+    if (!g_stats_on.load(std::memory_order_relaxed)) return;
+    std::lock_guard lock(g_stats_mu);
+    FileStat& s = g_stats[xbox];
+    s.disc = disc;
+    fn(s);
+}
+
+// the writes buffered in other open streams of a host file, onto the card before it is opened again
+void FlushOpen(const fs::path& host) {
+    std::lock_guard lock(g_open_mu);
+    for (File* f : g_open)
+        if (f->host == host) std::fflush(f->fp);
 }
 
 void TrackOpen(File* f) {
@@ -148,6 +193,7 @@ bool ReadsAt(FILE* fp, uint64_t at) {
     return !std::fseek(fp, long(at), SEEK_SET) && std::fread(&c, 1, 1, fp) == 1;
 }
 uint64_t EndOf(FILE* fp, const fs::path& p) {
+    g_moved++;
     std::fflush(fp);
     int fd = fileno(fp);
     struct stat st{};
@@ -377,6 +423,7 @@ Target Resolve(const std::string& xbox_path, uint32_t root_handle) {
 uint32_t OpenOnDisc(const Disc::Entry* e, const std::string& name, uint32_t handle_out, uint32_t iosb, uint32_t disposition,
                     uint32_t options) {
     if (!e && (disposition == 1 || disposition == 4)) {  // FILE_OPEN or FILE_OVERWRITE need an existing file
+        Count(Normalize(name), true, [](FileStat& s) { s.misses++; });
         LOG_FIRST(200, "missing %s", name.c_str());
         IoStatus(iosb, kObjectNameNotFound, 5);
         return kObjectNameNotFound;
@@ -393,6 +440,7 @@ uint32_t OpenOnDisc(const Disc::Entry* e, const std::string& name, uint32_t hand
     f->xbox = Normalize(name);
     f->entry = e;
     f->dir = e->dir;
+    Count(f->xbox, true, [](FileStat& s) { s.opens++; });
     W32(handle_out, NewHandle(f));
     IoStatus(iosb, kSuccess, 1);
     LOG_FIRST(400, "open %s", name.c_str());
@@ -425,6 +473,7 @@ KERNEL_EXPORT(190, NtCreateFile, 9) {
     Target t = Resolve(name, root);
     if (t.disc) return OpenOnDisc(t.entry, name, handle_out, iosb, disposition, options);
     std::string host = t.host;
+    Count(Normalize(name), false, [](FileStat& s) { s.opens++; });
     if (host.empty()) {
         LOGW("NtCreateFile: no mapping for %s", name.c_str());
         IoStatus(iosb, kObjectPathNotFound, 0);
@@ -498,6 +547,7 @@ KERNEL_EXPORT(190, NtCreateFile, 9) {
             return kInvalidParameter;
     }
     if (!exists) fs::create_directories(fs::path(host).parent_path(), ec);
+    FlushOpen(host);
     FILE* fp = std::fopen(host.c_str(), mode);
     if (!fp && std::string(mode) == "r+b") fp = std::fopen(host.c_str(), "rb");  // read only media
     if (!fp) {
@@ -527,6 +577,7 @@ KERNEL_EXPORT(202, NtOpenFile, 6) {
     std::string host = t.host;
     std::error_code ec;
     if (host.empty() || !fs::exists(host, ec)) {
+        Count(Normalize(name), false, [](FileStat& s) { s.misses++; });
         LOG_FIRST(200, "missing %s", name.c_str());
         IoStatus(iosb, kObjectNameNotFound, 5);
         return host.empty() ? kObjectPathNotFound : kObjectNameNotFound;
@@ -534,8 +585,10 @@ KERNEL_EXPORT(202, NtOpenFile, 6) {
     auto f = std::make_shared<File>();
     f->host = host;
     f->xbox = Normalize(name);
+    Count(f->xbox, false, [](FileStat& s) { s.opens++; });
     f->dir = fs::is_directory(host, ec);
     if (!f->dir) {
+        FlushOpen(host);
         if (WantsWrite(a[1])) f->fp = std::fopen(host.c_str(), "r+b");
         if (!f->fp) f->fp = std::fopen(host.c_str(), "rb");
         TrackOpen(f.get());
@@ -603,10 +656,15 @@ KERNEL_EXPORT(219, NtReadFile, 8) {
     if (f->entry) {
         n = len ? DiscRead(*f->entry, pos, HostPtr(buf), len) : 0;
     } else {
-        std::fseek(f->fp, long(pos), SEEK_SET);
+        SeekFor(*f, pos, 1);
         n = len ? HostRead(f->fp, HostPtr(buf), len) : 0;
+        f->at = n == len ? pos + n : ~0ull;  // short: at the end or failed, seek again next time
     }
     f->pos = pos + n;
+    Count(f->xbox, f->entry, [&](FileStat& s) {
+        s.reads++;
+        s.read_bytes += n;
+    });
     if (n < len && !f->entry) LOG_FIRST(32, "NtReadFile: %s at %llu: %zu of %u bytes", f->host.string().c_str(),
                                          (unsigned long long)pos, n, len);
     if (len && !n) {
@@ -628,8 +686,13 @@ KERNEL_EXPORT(236, NtWriteFile, 8) {
         int64_t o = int64_t(R64(off));
         if (o >= 0) pos = uint64_t(o);
     }
-    std::fseek(f->fp, long(pos), SEEK_SET);
+    SeekFor(*f, pos, 2);
     size_t n = HostWrite(f->fp, HostPtr(buf), len);
+    f->at = n == len ? pos + n : ~0ull;
+    Count(f->xbox, false, [&](FileStat& s) {
+        s.writes++;
+        s.write_bytes += n;
+    });
     if (n < len) LOGW("NtWriteFile: %s at %llu: %zu of %u bytes", f->host.string().c_str(), (unsigned long long)pos, n, len);
     f->pos = pos + n;
     IoStatus(iosb, kSuccess, uint32_t(n));
@@ -696,6 +759,7 @@ KERNEL_EXPORT(226, NtSetInformationFile, 5) {
                 fs::resize_file(f->host, R64(in), ec);
 #else
                 // through the open file: libnx's SD card has ftruncate, not the path's truncate resize_file takes
+                g_moved++;
                 if (ftruncate(fileno(f->fp), off_t(R64(in)))) ec.assign(errno, std::generic_category());
 #endif
                 if (ec) LOGW("NtSetInformationFile: %s to %llu bytes: %s", f->host.string().c_str(),
@@ -815,7 +879,9 @@ KERNEL_EXPORT(210, NtQueryFullAttributesFile, 2) {
     std::string name = ReadAnsiString(R32(a[0] + 4));
     Target t = Resolve(name, R32(a[0]));
     std::error_code ec;
-    if (t.disc ? !t.entry : t.host.empty() || !fs::exists(t.host, ec)) {
+    bool found = t.disc ? t.entry != nullptr : !t.host.empty() && fs::exists(t.host, ec);
+    Count(Normalize(name), t.disc, [&](FileStat& s) { found ? s.queries++ : s.misses++; });
+    if (!found) {
         LOG_FIRST(200, "missing %s", name.c_str());
         return kObjectNameNotFound;
     }
@@ -888,6 +954,54 @@ KERNEL_EXPORT(215, NtQuerySymbolicLinkObject, 3) {
     std::memcpy(HostPtr(R32(str + 4)), t.data(), t.size());
     W16(str, uint16_t(t.size()));
     return kSuccess;
+}
+
+// every open host file's buffered writes onto the card: before the title leaves, which ends the process unflushed
+void FlushFiles() {
+    std::lock_guard lock(g_open_mu);
+    for (File* f : g_open) std::fflush(f->fp);
+}
+
+// the port's profiler: count what the title does with each file, and the counts since the last call, the busiest
+// files first
+void EnableFileStats() { g_stats_on = true; }
+
+std::string TakeFileStats() {
+    std::map<std::string, FileStat> stats;
+    {
+        std::lock_guard lock(g_stats_mu);
+        stats.swap(g_stats);
+    }
+    FileStat disc, card;
+    std::vector<std::pair<uint64_t, const std::string*>> busy;
+    for (auto& [name, s] : stats) {
+        FileStat& t = s.disc ? disc : card;
+        t.opens += s.opens;
+        t.misses += s.misses;
+        t.queries += s.queries;
+        t.reads += s.reads;
+        t.writes += s.writes;
+        t.read_bytes += s.read_bytes;
+        t.write_bytes += s.write_bytes;
+        busy.push_back({uint64_t(s.opens + s.misses + s.queries + s.reads + s.writes), &name});
+    }
+    std::sort(busy.begin(), busy.end(), [](auto& a, auto& b) { return a.first > b.first; });
+    char line[256];
+    auto totals = [&](const char* what, const FileStat& t) {
+        std::snprintf(line, sizeof(line), "%s: %u opens, %u missing, %u queries, %u reads (%llu KB), %u writes (%llu KB)",
+                      what, t.opens, t.misses, t.queries, t.reads, (unsigned long long)(t.read_bytes >> 10), t.writes,
+                      (unsigned long long)(t.write_bytes >> 10));
+        return std::string(line);
+    };
+    std::string out = totals("game files", disc) + "; " + totals("SD card", card);
+    for (size_t i = 0; i < busy.size() && i < 8; i++) {
+        const FileStat& s = stats[*busy[i].second];
+        std::snprintf(line, sizeof(line), "\n  %s%s: %u opens %u missing %u queries %u reads (%llu KB) %u writes (%llu KB)",
+                      s.disc ? "" : "[SD] ", busy[i].second->c_str(), s.opens, s.misses, s.queries, s.reads,
+                      (unsigned long long)(s.read_bytes >> 10), s.writes, (unsigned long long)(s.write_bytes >> 10));
+        out += line;
+    }
+    return out;
 }
 
 }  // namespace kernel

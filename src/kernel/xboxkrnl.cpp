@@ -898,6 +898,7 @@ KERNEL_EXPORT(95, KeBugCheck, 1) {
 
 KERNEL_EXPORT(49, HalReturnToFirmware, 1) {
     LOGI("HalReturnToFirmware(%u): the title asked to leave", a[0]);
+    FlushFiles();
     // quick reboot into a recompiled image, the XAPI wrote the launch data page: restart into its executable with it
     uint32_t page = R32(g_launch_data_page_va);
     if (a[0] == 2 && page) {
