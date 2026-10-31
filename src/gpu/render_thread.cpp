@@ -75,8 +75,11 @@ struct Batch {
 
 // the plain data in State, around its shader pointers and the resource headers (sent as copies); of the transforms only
 // view, projection, texture and world are drawn with
+// what marks a range's writes (state.h): none, compared on every draw
+enum class Mark : uint8_t { None, Vsc, Transforms };
 struct Range {
     size_t off, len;
+    Mark mark = Mark::None;
 };
 size_t At(const State& s, const void* p) { return size_t(static_cast<const uint8_t*>(p) - reinterpret_cast<const uint8_t*>(&s)); }
 std::vector<Range> StateRanges() {
@@ -89,11 +92,12 @@ std::vector<Range> StateRanges() {
         {At(s, &s.simple[kMPsFinalConstant0 >> 2]), kMPsFinalConstant1 + 4 - kMPsFinalConstant0},
         {At(s, &s.rs), At(s, &s.textures) - At(s, &s.rs)},
         {At(s, &s.index_buffer), At(s, &s.vs) - At(s, &s.index_buffer)},
-        {At(s, &s.vsc), At(s, &s.rt) - At(s, &s.vsc)},
+        {At(s, &s.vsc), sizeof(s.vsc), Mark::Vsc},
+        {At(s, &s.psc), At(s, &s.rt) - At(s, &s.psc)},
         {At(s, &s.scissor_count), At(s, &s.transforms) - At(s, &s.scissor_count)},
-        {At(s, &s.transforms[2]), 2 * sizeof(s.transforms[0])},
-        {At(s, &s.transforms[16]), 4 * sizeof(s.transforms[0])},
-        {At(s, &s.transforms[256]), sizeof(s.transforms[0])},
+        {At(s, &s.transforms[2]), 2 * sizeof(s.transforms[0]), Mark::Transforms},
+        {At(s, &s.transforms[16]), 4 * sizeof(s.transforms[0]), Mark::Transforms},
+        {At(s, &s.transforms[256]), sizeof(s.transforms[0]), Mark::Transforms},
         {At(s, &s.material), sizeof(State) - At(s, &s.material)},
     };
 }
@@ -266,6 +270,11 @@ public:
         }
         LOGR("render thread: ms a frame by command:%s; on a CPU %.1f ms of them", n ? line : " none",
              double(busy_cpu_ns_.exchange(0)) / 1e6 / double(frames));
+        LOGR("state: of the ranges no write marked, %llu of %llu vsc and %llu of %llu transforms changed all the same",
+             (unsigned long long)marks_missed_[1], (unsigned long long)marks_quiet_[1],
+             (unsigned long long)marks_missed_[2], (unsigned long long)marks_quiet_[2]);
+        marks_missed_ = {};
+        marks_quiet_ = {};
         wait_ns_ = {};
         gpu_wait_ns_ = 0;
         report_presents_ = presents_;
@@ -394,16 +403,17 @@ private:
         return c.at;
     }
 
-    // a field of the render thread's State, when it differs from what was sent
-    void Delta(const void* field, const void* value, size_t n) {
+    // a field of the render thread's State, when it differs from what was sent; whether it did
+    bool Delta(const void* field, const void* value, size_t n) {
         uint8_t* sent = reinterpret_cast<uint8_t*>(&sent_) + At(sent_, field);
-        if (Same(sent, static_cast<const uint8_t*>(value), n)) return;
+        if (Same(sent, static_cast<const uint8_t*>(value), n)) return false;
         std::memcpy(sent, value, n);
         uint32_t head[2] = {uint32_t(At(sent_, field)), uint32_t(n)};
         size_t at = cur_->bytes.size();
         cur_->bytes.resize(at + 8 + n);
         std::memcpy(cur_->bytes.data() + at, head, 8);
         std::memcpy(cur_->bytes.data() + at + 8, value, n);
+        return true;
     }
 
     // what changed since the last command, in 64 byte pieces
@@ -411,9 +421,26 @@ private:
         const uint8_t* now = reinterpret_cast<const uint8_t*>(&s);
         Cmd c{Op::State};
         size_t first = cur_->bytes.size();
-        for (const Range& r : ranges_)
+        // the marked ranges are compared all the same for now, and a change their mark missed counted: the check
+        // that has to come out clean before they may go uncompared while unmarked
+        const uint32_t marks[3] = {0, g_vsc_writes, g_transform_writes};
+        for (const Range& r : ranges_) {
+            bool changed = false;
             for (size_t off = r.off, end = r.off + r.len; off < end; off += 64)
-                Delta(reinterpret_cast<const uint8_t*>(&sent_) + off, now + off, std::min<size_t>(64, end - off));
+                changed |= Delta(reinterpret_cast<const uint8_t*>(&sent_) + off, now + off, std::min<size_t>(64, end - off));
+            size_t m = size_t(r.mark);
+            if (!m) continue;
+            if (marks[m] == marks_seen_[m]) {
+                marks_quiet_[m]++;
+                if (changed) {
+                    marks_missed_[m]++;
+                    LOG_FIRST(16, "state: %s changed with no write marked (range at %zu)", m == 1 ? "vsc" : "transforms",
+                              r.off);
+                }
+            }
+        }
+        marks_seen_[1] = marks[1];
+        marks_seen_[2] = marks[2];
         std::array<uint32_t, 4> textures;
         for (size_t i = 0; i < 4; i++) textures[i] = Header(s.textures[i]);
         Delta(&sent_.textures, &textures, sizeof(textures));
@@ -596,6 +623,9 @@ private:
     // each command kind's wall time
     static constexpr size_t kOps = size_t(Op::ApplyShadows) + 1;
     std::array<std::atomic<uint64_t>, kOps> op_ns_{};
+    // the title's: the marks (state.h) at the last hand-over, and of the ranges unmarked since, how many changed
+    uint32_t marks_seen_[3] = {};
+    std::array<uint64_t, 3> marks_quiet_{}, marks_missed_{};
     std::atomic<uint64_t> busy_cpu_ns_{0};  // the batches' time on a CPU: set against busy_ns_, the rest is blocked
     static uint64_t CpuNs() {
 #ifdef _WIN32

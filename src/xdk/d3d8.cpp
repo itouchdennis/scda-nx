@@ -116,6 +116,7 @@ void UpdateViewportConstants() {
     float hw = v.w * 0.5f, hh = v.h * 0.5f;
     g_state.vsc[58] = {hw * g_view_scale, -hh * g_view_scale, (v.max_z - v.min_z) * g_state.zscale, 0};
     g_state.vsc[59] = {v.x + g_state.ss_offset_x + hw, v.y + g_state.ss_offset_y + hh, v.min_z * g_state.zscale, 0};
+    gpu::g_vsc_writes++;
 }
 
 void SetComplex(uint32_t rs, uint32_t v) {
@@ -254,6 +255,8 @@ HLE_STDCALL(Direct3D_CreateDevice, 6) {
         g_backend = gpu::CreateThreadedBackend(std::move(g_backend));
     }
     g_state = gpu::State{};
+    gpu::g_vsc_writes++;
+    gpu::g_transform_writes++;
     g_state.viewport = {0, 0, w, h, 0.0f, 1.0f};
     SetDev(kDevRenderTarget, g_buffers[1]);
     SetDev(kDevDepth, g_depth);
@@ -591,6 +594,7 @@ HLE_STDCALL(D3DDevice_SetTransform, 2) {
     std::memcpy(HostPtr(kDevice + 0xC60 + t * 64), HostPtr(a[1]), 64);
     uint32_t pc = t < 2 ? t + 2 : t < 6 ? t + 14 : t + 250;
     std::memcpy(g_state.transforms[pc].data(), HostPtr(a[1]), 64);
+    gpu::g_transform_writes++;
     return 0;
 }
 
@@ -730,6 +734,7 @@ HLE_STDCALL(D3DDevice_SetVertexShader, 1) {
             // constants declared with the shader load when it is selected
             for (auto& [reg, v] : it->second->constants)
                 if (reg < 192) g_state.vsc[reg] = v;
+            gpu::g_vsc_writes++;
         } else {
             LOG_FIRST(8, "d3d: SetVertexShader with unknown handle %08X", h);
         }
@@ -740,23 +745,27 @@ HLE_STDCALL(D3DDevice_SetVertexShader, 1) {
 HLE_FASTCALL(D3DDevice_SetVertexShaderConstant1Fast, 0) {
     uint32_t reg = ctx.ecx;
     if (reg < 192) std::memcpy(g_state.vsc[reg].data(), HostPtr(ctx.edx), 16);
+    gpu::g_vsc_writes++;
     return 0;
 }
 
 HLE_FASTCALL(D3DDevice_SetVertexShaderConstant1, 0) {
     uint32_t reg = ctx.ecx;
     if (reg < 192) std::memcpy(g_state.vsc[reg].data(), HostPtr(ctx.edx), 16);
+    gpu::g_vsc_writes++;
     return 0;
 }
 
 HLE_FASTCALL(D3DDevice_SetVertexShaderConstant4, 0) {
     for (uint32_t i = 0; i < 4 && ctx.ecx + i < 192; i++) std::memcpy(g_state.vsc[ctx.ecx + i].data(), HostPtr(ctx.edx + i * 16), 16);
+    gpu::g_vsc_writes++;
     return 0;
 }
 
 HLE_FASTCALL(D3DDevice_SetVertexShaderConstantNotInlineFast, 1) {
     uint32_t reg = ctx.ecx, src = ctx.edx, dwords = a[0];
     for (uint32_t i = 0; i < dwords / 4 && reg + i < 192; i++) std::memcpy(g_state.vsc[reg + i].data(), HostPtr(src + i * 16), 16);
+    gpu::g_vsc_writes++;
     return 0;
 }
 

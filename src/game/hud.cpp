@@ -455,6 +455,7 @@ void Unmask() {
     auto& s = d3d::State();
     if (s.vsc[kC70] == g_mask.n70) s.vsc[kC70] = g_mask.c70;
     if (s.vsc[kC71] == g_mask.n71) s.vsc[kC71] = g_mask.c71;
+    gpu::g_vsc_writes++;
     uint32_t& func = s.simple[gpu::kMAlphaFunc >> 2];
     uint32_t& ref = s.simple[gpu::kMAlphaRef >> 2];
     if (func == kLess && ref == kHalf) func = g_mask.func, ref = g_mask.ref;
@@ -478,6 +479,7 @@ X86_FUNC(sub_002E3EC4) {
     g_mask.n70[0] = (1 - g_mask.n71[0]) / 2;
     s.vsc[kC70] = g_mask.n70;
     s.vsc[kC71] = g_mask.n71;
+    gpu::g_vsc_writes++;
     uint32_t& func = s.simple[gpu::kMAlphaFunc >> 2];
     uint32_t& ref = s.simple[gpu::kMAlphaRef >> 2];
     g_mask.func = func;

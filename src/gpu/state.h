@@ -182,4 +182,9 @@ struct State {
     float zscale = 16777215.0f;  // depth buffer units per 1.0
 };
 
+// Bumped by every write to the title's State::vsc and to its transforms (xdk/d3d8.cpp, game/hud.cpp): the threaded
+// backend's hand-over need not compare 3.5 KB of them on each draw when neither moved. The title's thread only.
+inline uint32_t g_vsc_writes = 0;
+inline uint32_t g_transform_writes = 0;
+
 }  // namespace gpu
