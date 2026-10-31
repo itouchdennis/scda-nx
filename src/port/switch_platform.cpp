@@ -153,17 +153,36 @@ void RaiseClocks() {
 
 }  // namespace
 
-// set again when the CPU setting changes and when the console is docked or taken out, which resets the clocks; the
-// clocks themselves are not watched, so an overclocking tool the player runs keeps its own
+namespace {
+// the system puts its own clocks back when the game comes back from the HOME menu or sleep and on a change of mode:
+// SDL's event loop runs libnx's applet messages, and this hook marks the clocks to be set again
+std::atomic<bool> g_clocks_reset{false};
+AppletHookCookie g_clock_hook;
+void OnApplet(AppletHookType hook, void*) {
+    if (hook == AppletHookType_OnFocusState || hook == AppletHookType_OnResume ||
+        hook == AppletHookType_OnOperationMode || hook == AppletHookType_OnPerformanceMode)
+        g_clocks_reset = true;
+}
+}  // namespace
+
+// set again when the CPU setting changes, when the console is docked or taken out, and when the game comes back from
+// the HOME menu or sleep, which all reset the clocks; the clocks themselves are not watched, so an overclocking tool
+// the player runs keeps its own
 void KeepClocks(uint32_t cpu_mhz) {
     static uint32_t cpu = 0;
     static bool docked = false;
     static u64 checked = 0;
+    static bool hooked = false;
+    if (!hooked) {
+        appletHook(&g_clock_hook, OnApplet, nullptr);
+        hooked = true;
+    }
+    bool reset = g_clocks_reset.exchange(false);
     u64 now = armTicksToNs(armGetSystemTick());
-    if (cpu_mhz == cpu && now - checked < kModeCheckNs) return;
+    if (cpu_mhz == cpu && !reset && now - checked < kModeCheckNs) return;
     checked = now;
     bool mode = Docked();
-    if (cpu_mhz == cpu && mode == docked) return;
+    if (cpu_mhz == cpu && mode == docked && !reset) return;
     cpu = cpu_mhz;
     docked = mode;
     SetClocks(cpu_mhz * 1000000, docked);
