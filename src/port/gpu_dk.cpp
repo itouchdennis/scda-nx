@@ -733,7 +733,9 @@ bool DkBackend::CreateImage(Image& img, DkImageFormat fmt, DkImageType type, uin
     dkImageLayoutMakerDefaults(&lm, device_);
     lm.type = type;
     lm.format = fmt;
-    lm.flags = DkImageFlags_Usage2DEngine | (render ? DkImageFlags_UsageRender | DkImageFlags_HwCompression : 0u);
+    // no hardware compression: uploads, copies and blits go through the 2D and copy engines, which write and read
+    // the plain layout (a compressed target written by them stayed black: the loading screen, the menu's video)
+    lm.flags = DkImageFlags_Usage2DEngine | (render ? DkImageFlags_UsageRender : 0u);
     lm.dimensions[0] = w;
     lm.dimensions[1] = h;
     lm.dimensions[2] = type == DkImageType_3D ? d : type == DkImageType_Cubemap ? 6 : 1;
