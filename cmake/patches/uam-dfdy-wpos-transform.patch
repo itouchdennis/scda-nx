@@ -1,0 +1,25 @@
+--- a/runtime/third_party/uam/source/glsl_frontend.cpp
++++ b/runtime/third_party/uam/source/glsl_frontend.cpp
+@@ -488,6 +488,22 @@
+ 		}
+ 
+ 		gl_program_parameter_list *pl = linked_shader->Program->Parameters;
++		// scda-nx patch: STATE_FB_WPOS_Y_TRANSFORM was left 0 in the DKSH's constant buffer, so every dFdy() (Mesa
++		// multiplies its operand by .x) and a flipped gl_FragCoord.y came out 0. deko3d draws with the origin upper
++		// left, as GL into an FBO: (1, 0, -1, height), nothing flipped
++		for (unsigned i = 0; i < pl->NumParameters; i ++)
++		{
++			gl_program_parameter *p = &pl->Parameters[i];
++			if (p->Type == PROGRAM_STATE_VAR && p->StateIndexes[0] == STATE_INTERNAL &&
++			    p->StateIndexes[1] == STATE_FB_WPOS_Y_TRANSFORM)
++			{
++				gl_constant_value *v = pl->ParameterValues + pl->ParameterValueOffset[i];
++				v[0].f = 1.0f;
++				v[1].f = 0.0f;
++				v[2].f = -1.0f;
++				v[3].f = 0.0f;
++			}
++		}
+ 		unsigned last_location = ~0U;
+ 		bool has_uniforms_in_driver_cbuf = false;
+ 		for (unsigned i = 0; i < pl->NumParameters; i ++)

@@ -32,6 +32,6 @@ struct Dksh {
 bool CompileHlsl(const std::string& hlsl, const char* entry, vk::Stage stage, Dksh& out);
 
 // changes when the GLSL written or the compiler changes: a kept DKSH from another revision is compiled again
-constexpr uint32_t kRevision = 1;
+constexpr uint32_t kRevision = 4;  // 4: uam with dFdy fixed
 
 }  // namespace gpu::dk

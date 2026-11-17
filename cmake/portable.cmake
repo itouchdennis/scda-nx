@@ -157,6 +157,9 @@ if(NOT SCDA_GPU STREQUAL "null")
         endif()
         FetchContent_Declare(uam
             URL https://github.com/centollOS/SwitchWakerHD/archive/2d147aaaa27b1ad0f9b390eff515609af9fe24a3.tar.gz
+            # dFdy() and gl_FragCoord.y were multiplied by an unfilled GL state value (0): cmake/patches
+            PATCH_COMMAND sh -c "patch -p1 -R -s -f --dry-run -i $0 >/dev/null || patch -p1 -i $0"
+                ${CMAKE_CURRENT_LIST_DIR}/patches/uam-dfdy-wpos-transform.patch
             SOURCE_SUBDIR runtime/third_party/uam)
         FetchContent_MakeAvailable(uam)
         list(APPEND GPU_LIBS uamlib deko3d nx stdc++ m)

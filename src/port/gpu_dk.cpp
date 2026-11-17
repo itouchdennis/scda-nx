@@ -2266,7 +2266,7 @@ void DkBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t cou
     }
     drawn_ = true;
     // diagnostic: the first draws' state, and their target right after them
-    if (draws_ <= 40) {
+    if (draws_ <= 250) {
         LOGI("dk: draw %llu: prim %d count %u idx %u into %08X%s, cull %u front %u fill %u, z %u/%u func %u, "
              "stencil %u, blend %u, mask %X, vp %.0fx%.0f, scissor %u,%u %ux%u, tex %u %u %u %u, rect %d%d%d%d",
              (unsigned long long)draws_, int(PrimitiveOf(a)), a.draw_count, a.index_count,
@@ -2276,6 +2276,56 @@ void DkBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t cou
              uint32_t(dyn_.colour.blendEnableMask), dyn_.mask.masks & 0xF, dyn_.vp.width, dyn_.vp.height, dyn_.sc.x,
              dyn_.sc.y, dyn_.sc.width, dyn_.sc.height, images_dbg_[0], images_dbg_[1], images_dbg_[2], images_dbg_[3],
              stages.info[0].rect, stages.info[1].rect, stages.info[2].rect, stages.info[3].rect);
+        if (draws_ > 6) {
+            const auto* cc = reinterpret_cast<const DrawConstants*>(dc.cpu);
+            LOGI("dk:  draw %llu vkey %016llX pkey %016llX pc0 %g %g %g %g", (unsigned long long)draws_,
+                 (unsigned long long)sh.vkey, (unsigned long long)sh.pkey, double(cc->pc[0][0]), double(cc->pc[0][1]),
+                 double(cc->pc[0][2]), double(cc->pc[0][3]));
+        }
+        if (draws_ <= 6) {
+            // diagnostic: what the draw reads, to set beside the Vulkan backend's
+            LOGI("dk:  draw %llu shaders: prog %d quad %d fixed_transform %d pretransformed %d regs %04X decode %016llX "
+                 "vkey %016llX pkey %016llX, guest size %ux%u, viewport %.1f %.1f %.1f %.1f",
+                 (unsigned long long)draws_, sh.prog, sh.quad, sh.fixed_transform, a.pretransformed, a.regs,
+                 (unsigned long long)a.decode, (unsigned long long)sh.vkey, (unsigned long long)sh.pkey, size.w, size.h,
+                 dyn_.vp.x, dyn_.vp.y, dyn_.vp.width, dyn_.vp.height);
+            for (int r = 0; r < 16; r++) {
+                if (!((a.regs >> r) & 1)) continue;
+                const VertexElement& e = a.elements[size_t(r)];
+                LOGI("dk:  draw %llu v%d: format %u buffer %u offset %u -> location %d", (unsigned long long)draws_, r,
+                     e.format, e.buffer, e.offset, vs->locations[r]);
+            }
+            for (uint32_t i = 0; i < a.buffer_count; i++) {
+                const VertexBuffer& b = a.buffers[i];
+                LOGI("dk:  draw %llu buffer %u: stride %u bytes %u", (unsigned long long)draws_, i, b.stride, b.bytes);
+                for (uint32_t vtx = 0; vtx < 4 && b.src && b.stride && (vtx + 1) * b.stride <= b.bytes; vtx++) {
+                    const uint8_t* p = b.src + size_t(vtx) * b.stride;
+                    std::string line;
+                    for (uint32_t w = 0; w < std::min(b.stride / 4, 8u); w++) {
+                        uint32_t u;
+                        float f;
+                        std::memcpy(&u, p + w * 4, 4);
+                        std::memcpy(&f, p + w * 4, 4);
+                        char tmp[40];
+                        std::snprintf(tmp, sizeof(tmp), " %08X(%g)", u, double(f));
+                        line += tmp;
+                    }
+                    LOGI("dk:  draw %llu   vertex %u:%s", (unsigned long long)draws_, vtx, line.c_str());
+                }
+            }
+            const auto* cc = reinterpret_cast<const DrawConstants*>(dc.cpu);
+            auto v4 = [](const float* f) {
+                char tmp[80];
+                std::snprintf(tmp, sizeof(tmp), "(%g %g %g %g)", double(f[0]), double(f[1]), double(f[2]),
+                              double(f[3]));
+                return std::string(tmp);
+            };
+            LOGI("dk:  draw %llu constants: surf %s misc %s pc0 %s pc1 %s pc16 %s tfactor %s texsize0 %s texsize1 %s "
+                 "hdr %s",
+                 (unsigned long long)draws_, v4(cc->surf).c_str(), v4(cc->misc).c_str(), v4(cc->pc[0]).c_str(),
+                 v4(cc->pc[1]).c_str(), v4(cc->pc[16]).c_str(), v4(cc->tfactor).c_str(), v4(cc->texsize[0]).c_str(),
+                 v4(cc->texsize[1]).c_str(), v4(cc->hdr).c_str());
+        }
         if (draws_ <= 6 && bound_rt_) {
             char name[48];
             std::snprintf(name, sizeof(name), "draw_%02llu_%08X", (unsigned long long)draws_, bound_rt_->data);
@@ -2627,7 +2677,7 @@ void DkBackend::Present(const Surface& front, bool pillarbox) {
         std::snprintf(name, sizeof(name), "tex_%08X_%zu", a, dumped_textures_++);
         if (it != textures_.end() && it->second.img.valid) DumpImage(it->second.img, name);
     }
-    if (t && (presents_ < 3 || presents_ % 300 == 0) && presents_ <= 1500) {
+    if (t && (presents_ < 3 || (presents_ % 10 == 0 && presents_ <= 200) || presents_ % 300 == 0) && presents_ <= 1500) {
         char name[48];
         std::snprintf(name, sizeof(name), "front_%04llu_%08X", (unsigned long long)presents_, t->data);
         DumpImage(t->img, name);
