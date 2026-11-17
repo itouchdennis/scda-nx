@@ -1020,7 +1020,8 @@ void DkBackend::CopyToImage(const Image& img, const Alloc& src, uint32_t level, 
     if (!src.cpu) return;
     DkImageView v = LevelView(img, level);
     DkImageRect r = {0, 0, img.type == DkImageType_3D ? 0 : layer, w, h, img.type == DkImageType_3D ? d : 1};
-    DkCopyBuf b = {src.gpu, row_bytes, rows};
+    // deko3d's buffer layout: the row's bytes and the slice's bytes (not its rows)
+    DkCopyBuf b = {src.gpu, row_bytes, row_bytes * rows};
     dkCmdBufCopyBufferToImage(Cmd(), &b, &v, &r, 0);
     pending_ = true;
 }
@@ -1042,7 +1043,7 @@ bool DkBackend::ReadTarget(Target& t, std::vector<uint8_t>& px) {
     Outside();
     DkImageView v = LevelView(*src, 0);
     DkImageRect r = {0, 0, 0, t.gw, t.gh, 1};
-    DkCopyBuf b = {rb.mem.gpu, t.gw * 4, t.gh};
+    DkCopyBuf b = {rb.mem.gpu, t.gw * 4, t.gw * 4 * t.gh};
     dkCmdBufCopyImageToBuffer(Cmd(), &v, &r, &b, 0);
     dkCmdBufBarrier(Cmd(), DkBarrier_Full, DkInvalidateFlags_L2Cache);
     WaitSerial(Submit());
@@ -2359,7 +2360,7 @@ void DkBackend::CopyLate(Late& l, Target& t) {
     Outside();
     DkImageView v = LevelView(*src, 0);
     DkImageRect r = {0, 0, 0, t.gw, t.gh, 1};
-    DkCopyBuf b = {l.buf[slot].mem.gpu, t.gw * 4, t.gh};
+    DkCopyBuf b = {l.buf[slot].mem.gpu, t.gw * 4, t.gw * 4 * t.gh};
     dkCmdBufCopyImageToBuffer(Cmd(), &v, &r, &b, 0);
     pending_ = true;
     l.serial[slot] = serial_;
