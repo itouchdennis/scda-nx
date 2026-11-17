@@ -136,6 +136,7 @@ struct Image {
     DkImageType type = DkImageType_2D;
     uint32_t w = 0, h = 0, d = 1, layers = 1, levels = 1;
     bool depth = false;
+    bool render = false;  // a render target: the copy engine's layout is not the 3D engine's for it
     uint32_t desc = 0;  // its image descriptor's slot, 0 for none
 };
 
@@ -376,6 +377,12 @@ private:
     Buffer& Readback(uint32_t bytes);
     bool ReadTarget(Target& t, std::vector<uint8_t>& px);
     Image* Scratch(uint32_t w, uint32_t h);
+    Image* Staging(uint32_t w, uint32_t h);
+    void CopyOut(const Image& src, uint32_t w, uint32_t h, DkGpuAddr dst);
+    void DumpImage(const Image& img, const char* name);
+    std::vector<uint32_t> dump_textures_;
+    uint32_t images_dbg_[4] = {};  // diagnostic: linear textures to dump at the next present
+    size_t dumped_textures_ = 0;
     Image* GuestSized(Target& t);
     void Blit(const Image& src, uint32_t sw, uint32_t sh, const Image& dst, uint32_t dw, uint32_t dh);
     void ClearImage(Image& img, float z);
@@ -468,6 +475,7 @@ private:
     Buffer readback_;
     float scale_ = 1.0f;
     std::unordered_map<uint64_t, Image> scratch_;
+    std::unordered_map<uint64_t, Image> staging_;  // plain images between the copy engine and render targets
 
     // the bound targets, and what the next draw wants
     bool pending_ = false;  // copies, uploads or other targets written since the last barrier
@@ -729,6 +737,7 @@ bool DkBackend::CreateImage(Image& img, DkImageFormat fmt, DkImageType type, uin
     img.layers = layers;
     img.levels = levels;
     img.depth = fmt == DkImageFormat_Z24S8 || fmt == DkImageFormat_ZF32;
+    img.render = render;
     DkImageLayoutMaker lm;
     dkImageLayoutMakerDefaults(&lm, device_);
     lm.type = type;
@@ -762,8 +771,7 @@ void DkBackend::DestroyImage(Image& img) {
 // read: CPU cached and GPU uncached, for read-backs; else CPU uncached, written once and read by the GPU
 bool DkBackend::CreateBuffer(Buffer& b, uint32_t size, bool read) {
     b.mem = Allocate(size, DK_MEMBLOCK_ALIGNMENT,
-                     read ? DkMemBlockFlags_CpuCached | DkMemBlockFlags_GpuUncached
-                          : DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached,
+                     DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached,
                      false);
     b.size = b.mem ? size : 0;
     return bool(b.mem);
@@ -1020,10 +1028,22 @@ void DkBackend::Inside(Target* rt, Target* ds) {
 void DkBackend::CopyToImage(const Image& img, const Alloc& src, uint32_t level, uint32_t layer, uint32_t w,
                             uint32_t h, uint32_t d, uint32_t row_bytes, uint32_t rows) {
     if (!src.cpu) return;
-    DkImageView v = LevelView(img, level);
-    DkImageRect r = {0, 0, img.type == DkImageType_3D ? 0 : layer, w, h, img.type == DkImageType_3D ? d : 1};
     // deko3d's buffer layout: the row's bytes and the slice's bytes (not its rows)
     DkCopyBuf b = {src.gpu, row_bytes, row_bytes * rows};
+    if (img.render) {
+        // into a plain image with the copy engine, then into the target with the 2D engine
+        Image* st = Staging(w, h);
+        if (!st) return;
+        DkImageView sv = LevelView(*st, 0), dv = LevelView(img, 0);
+        DkImageRect r = {0, 0, 0, w, h, 1};
+        dkCmdBufCopyBufferToImage(Cmd(), &b, &sv, &r, 0);
+        dkCmdBufBarrier(Cmd(), DkBarrier_Full, DkInvalidateFlags_Image);
+        dkCmdBufBlitImage(Cmd(), &sv, &r, &dv, &r, 0, 0);
+        pending_ = true;
+        return;
+    }
+    DkImageView v = LevelView(img, level);
+    DkImageRect r = {0, 0, img.type == DkImageType_3D ? 0 : layer, w, h, img.type == DkImageType_3D ? d : 1};
     dkCmdBufCopyBufferToImage(Cmd(), &b, &v, &r, 0);
     pending_ = true;
 }
@@ -1042,16 +1062,70 @@ bool DkBackend::ReadTarget(Target& t, std::vector<uint8_t>& px) {
     if (!rb.mem.cpu) return false;
     Image* src = GuestSized(t);
     if (!src) return false;
-    Outside();
-    DkImageView v = LevelView(*src, 0);
-    DkImageRect r = {0, 0, 0, t.gw, t.gh, 1};
-    DkCopyBuf b = {rb.mem.gpu, t.gw * 4, t.gw * 4 * t.gh};
-    dkCmdBufCopyImageToBuffer(Cmd(), &v, &r, &b, 0);
-    dkCmdBufBarrier(Cmd(), DkBarrier_Full, DkInvalidateFlags_L2Cache);
+    CopyOut(*src, t.gw, t.gh, rb.mem.gpu);
     WaitSerial(Submit());
-    dkMemBlockFlushCpuCache(rb.mem.block, 0, bytes);
+    (void)0;  // uncached: nothing to flush
     px.assign(rb.mem.cpu, rb.mem.cpu + bytes);
     return true;
+}
+
+// diagnostic: a BGRA image's level 0 as shots/<name>.ppm beside the log (waits for the GPU)
+void DkBackend::DumpImage(const Image& img, const char* name) {
+    if (img.format != kColourFormat || img.type != DkImageType_2D) return;
+    uint32_t bytes = img.w * img.h * 4;
+    Buffer& rb = Readback(bytes);
+    if (!rb.mem.cpu) return;
+    CopyOut(img, img.w, img.h, rb.mem.gpu);
+    WaitSerial(Submit());
+    (void)0;  // uncached: nothing to flush
+    std::vector<uint8_t> px(rb.mem.cpu, rb.mem.cpu + bytes);  // one copy out of uncached memory
+    std::filesystem::path dir = port::HomeDir() / "shots";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (FILE* f = std::fopen((dir / (std::string(name) + ".ppm")).string().c_str(), "wb")) {
+        std::fprintf(f, "P6\n%u %u\n255\n", img.w, img.h);
+        std::vector<uint8_t> rgb(size_t(img.w) * img.h * 3);
+        uint64_t sum = 0;
+        for (uint32_t i = 0, o = 0; i < bytes; i += 4, o += 3) {
+            rgb[o] = px[i + 2];
+            rgb[o + 1] = px[i + 1];
+            rgb[o + 2] = px[i];
+            sum += rgb[o] + rgb[o + 1] + rgb[o + 2];
+        }
+        std::fwrite(rgb.data(), 1, rgb.size(), f);
+        std::fclose(f);
+        LOGI("dk: dumped %s (%ux%u), mean %.1f", name, img.w, img.h, double(sum) / (3.0 * img.w * img.h));
+    }
+}
+
+// a plain (not render) colour image of this size: the copy engine writes and reads it in the layout the 2D engine
+// and the samplers use; render targets go through it
+Image* DkBackend::Staging(uint32_t w, uint32_t h) {
+    Image& img = staging_[uint64_t(w) << 32 | h];
+    if (!img.valid && !CreateImage(img, kColourFormat, DkImageType_2D, w, h, 1, 1, 1, false)) return nullptr;
+    return &img;
+}
+
+// w x h pixels of a colour image's level 0 into a buffer, rows of w * 4 bytes; a render target by way of a plain image
+void DkBackend::CopyOut(const Image& src, uint32_t w, uint32_t h, DkGpuAddr dst) {
+    const Image* from = &src;
+    if (src.render) {
+        Image* st = Staging(w, h);
+        if (!st) return;
+        Outside();
+        DkImageView a = LevelView(src, 0), b = LevelView(*st, 0);
+        DkImageRect r = {0, 0, 0, w, h, 1};
+        dkCmdBufBlitImage(Cmd(), &a, &r, &b, &r, 0, 0);
+        pending_ = true;
+        from = st;
+    }
+    Outside();
+    DkImageView v = LevelView(*from, 0);
+    DkImageRect r = {0, 0, 0, w, h, 1};
+    DkCopyBuf b = {dst, w * 4, w * 4 * h};
+    dkCmdBufCopyImageToBuffer(Cmd(), &v, &r, &b, 0);
+    dkCmdBufBarrier(Cmd(), DkBarrier_Full, DkInvalidateFlags_L2Cache);
+    pending_ = true;
 }
 
 Image* DkBackend::Scratch(uint32_t w, uint32_t h) {
@@ -1658,6 +1732,8 @@ void DkBackend::UploadTarget(Target& t, const Surface& s) {
     DecodeLevel(d, 0, 0, static_cast<const uint8_t*>(kernel::HostPtr(d.data)), nullptr, px, pitch);
     uint32_t w = std::min(d.width, t.gw), h = std::min(d.height, t.gh);
     bool scaled = t.w != t.gw || t.h != t.gh;
+    LOG_FIRST(200, "dk: CPU pixels into target %08X: %ux%u, pitch %u, %zu bytes, host %ux%u", t.data, w, h, pitch,
+              px.size(), t.w, t.h);
     Image* into = scaled ? Scratch(t.gw, t.gh) : &t.img;
     if (!into) return;
     Alloc a = Upload(size_t(pitch) * h, 16);
@@ -1665,6 +1741,14 @@ void DkBackend::UploadTarget(Target& t, const Surface& s) {
     Outside();
     CopyToImage(*into, a, 0, 0, w, h, 1, pitch, h);
     if (scaled) Blit(*into, t.gw, t.gh, t.img, t.w, t.h);
+    static int dumped = 0;
+    if (dumped < 2) {
+        char name[48];
+        std::snprintf(name, sizeof(name), "upload_%d_%08X_scratch", dumped, t.data);
+        DumpImage(*into, name);
+        std::snprintf(name, sizeof(name), "upload_%d_%08X_target", dumped++, t.data);
+        DumpImage(t.img, name);
+    }
     if (!t.read.empty() && d.width == t.gw && d.height == t.gh && pitch == t.gw * 4) t.read = px;
     t.epoch = DirtyEpoch(t.data);
     t.sig = MemSig(t.data, t.bytes);
@@ -1722,6 +1806,8 @@ bool DkBackend::CreateTexture(Tex& tx, const TextureDesc& d, const FormatInfo& f
     if (fi.compressed && ((d.width & 3) || (d.height & 3))) tx.levels = 1;
     uint32_t z = d.cube ? 1 : std::max(d.depth, 1u);
     DkImageType type = d.cube ? DkImageType_Cubemap : z > 1 ? DkImageType_3D : DkImageType_2D;
+    LOG_FIRST(300, "dk: texture %08X %ux%ux%u format %02X (%s, host %d) levels %u%s%s", d.data, d.width, d.height, z,
+              d.format, fi.name, int(fi.host), tx.levels, d.linear ? " linear" : "", d.cube ? " cube" : "");
     return CreateImage(tx.img, TextureFormat(fi), type, d.width, d.height, z, d.cube ? 6 : 1, tx.levels, false);
 }
 
@@ -1773,6 +1859,7 @@ uint32_t DkBackend::BindGuestTexture(int stage, const TextureDesc& d, const Form
         if (sig != tx.sig || !same) {
             tx.sig = sig;
             UploadTexture(tx, d, fi, static_cast<const uint8_t*>(kernel::HostPtr(d.data)));
+            if (d.linear && dump_textures_.size() < 4) dump_textures_.push_back(d.data);
         }
     }
     stages.levels[stage] = tx.levels;
@@ -2127,6 +2214,7 @@ void DkBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t cou
             uint8_t kind = stages.info[i].kind;
             images[i] = stages.desc[i] ? stages.desc[i] : dummy_[kind <= kTexCube ? kind : 0].desc;
             smps[i] = Sampler(StageSampler(s, i, stages, clamp, aniso));
+            images_dbg_[i] = images[i];
         }
         Descriptors();
         DkCmdBuf c = Cmd();
@@ -2159,6 +2247,23 @@ void DkBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t cou
         }
     }
     drawn_ = true;
+    // diagnostic: the first draws' state, and their target right after them
+    if (draws_ <= 40) {
+        LOGI("dk: draw %llu: prim %d count %u idx %u into %08X%s, cull %u front %u fill %u, z %u/%u func %u, "
+             "stencil %u, blend %u, mask %X, vp %.0fx%.0f, scissor %u,%u %ux%u, tex %u %u %u %u, rect %d%d%d%d",
+             (unsigned long long)draws_, int(PrimitiveOf(a)), a.draw_count, a.index_count,
+             bound_rt_ ? bound_rt_->data : 0u, bound_ds_ ? " +depth" : "", uint32_t(dyn_.rast.cullMode),
+             uint32_t(dyn_.rast.frontFace), uint32_t(dyn_.rast.polygonModeFront), uint32_t(dyn_.ds.depthTestEnable),
+             uint32_t(dyn_.ds.depthWriteEnable), uint32_t(dyn_.ds.depthCompareOp), uint32_t(dyn_.ds.stencilTestEnable),
+             uint32_t(dyn_.colour.blendEnableMask), dyn_.mask.masks & 0xF, dyn_.vp.width, dyn_.vp.height, dyn_.sc.x,
+             dyn_.sc.y, dyn_.sc.width, dyn_.sc.height, images_dbg_[0], images_dbg_[1], images_dbg_[2], images_dbg_[3],
+             stages.info[0].rect, stages.info[1].rect, stages.info[2].rect, stages.info[3].rect);
+        if (draws_ <= 6 && bound_rt_) {
+            char name[48];
+            std::snprintf(name, sizeof(name), "draw_%02llu_%08X", (unsigned long long)draws_, bound_rt_->data);
+            DumpImage(bound_rt_->img, name);
+        }
+    }
 }
 
 void DkBackend::ClearTargets(Target* rt, Target* ds, const State& s, uint32_t count, const uint8_t* rects,
@@ -2320,7 +2425,7 @@ bool DkBackend::DeliverLate(uint32_t data) {
     if (l.seq[best] > l.delivered) {
         uint32_t pitch = GuestPitch(l.gw);
         uint8_t* dst = static_cast<uint8_t*>(kernel::HostPtr(data));
-        dkMemBlockFlushCpuCache(l.buf[best].mem.block, 0, l.gw * l.gh * 4);
+        (void)0;  // uncached: nothing to flush
         const uint8_t* src = l.buf[best].mem.cpu;
         for (uint32_t y = 0; y < l.gh; y++) {
             std::memcpy(dst + size_t(y) * pitch, src + size_t(y) * l.gw * 4, l.gw * 4);
@@ -2359,12 +2464,7 @@ void DkBackend::CopyLate(Late& l, Target& t) {
     }
     Image* src = GuestSized(t);
     if (!src) return;
-    Outside();
-    DkImageView v = LevelView(*src, 0);
-    DkImageRect r = {0, 0, 0, t.gw, t.gh, 1};
-    DkCopyBuf b = {l.buf[slot].mem.gpu, t.gw * 4, t.gw * 4 * t.gh};
-    dkCmdBufCopyImageToBuffer(Cmd(), &v, &r, &b, 0);
-    pending_ = true;
+    CopyOut(*src, t.gw, t.gh, l.buf[slot].mem.gpu);
     l.serial[slot] = serial_;
     l.fence[slot] = &subs_[cur_].fence;
     l.done[slot] = false;
@@ -2499,6 +2599,21 @@ void DkBackend::Present(const Surface& front, bool pillarbox) {
     }
     Target* t = EnsureTarget(front, false);
     if (t && LatchCpuWrite(*t)) UploadTarget(*t, front);
+    LOG_FIRST(150, "dk: present %llu: front %08X %ux%u (host %ux%u), %llu draws so far", (unsigned long long)presents_,
+              t ? t->data : 0u, t ? t->gw : 0u, t ? t->gh : 0u, t ? t->w : 0u, t ? t->h : 0u,
+              (unsigned long long)draws_);
+    while (dumped_textures_ < dump_textures_.size()) {
+        uint32_t a = dump_textures_[dumped_textures_];
+        auto it = textures_.find(a);
+        char name[48];
+        std::snprintf(name, sizeof(name), "tex_%08X_%zu", a, dumped_textures_++);
+        if (it != textures_.end() && it->second.img.valid) DumpImage(it->second.img, name);
+    }
+    if (t && (presents_ < 3 || presents_ % 300 == 0) && presents_ <= 1500) {
+        char name[48];
+        std::snprintf(name, sizeof(name), "front_%04llu_%08X", (unsigned long long)presents_, t->data);
+        DumpImage(t->img, name);
+    }
     const Image* shown = t ? &t->img : nullptr;
     if (t && set.smaa) {
         if (const Image* aa = Smaa(*t)) shown = aa;
