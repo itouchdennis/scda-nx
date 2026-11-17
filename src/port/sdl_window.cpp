@@ -30,9 +30,9 @@ namespace dispatch {
 bool Load(const std::filesystem::path& dll);
 }
 
-// the Switch's Vulkan renderer opens no SDL window: SDL's would put an EGL surface on the default NWindow, which
-// Vulkan presents to itself (switch_platform.cpp). Input and sound need none
-#if defined(SCDA_VK) && defined(SCDA_SWITCH)
+// the Switch's Vulkan and deko3d renderers open no SDL window: SDL's would put an EGL surface on the default NWindow,
+// which they present to themselves (switch_platform.cpp, gpu_dk.cpp). Input and sound need none
+#if (defined(SCDA_VK) || defined(SCDA_DK)) && defined(SCDA_SWITCH)
 #define SCDA_NO_WINDOW
 #endif
 

@@ -14,7 +14,7 @@ endif()
 option(SCDA_VERBOSE_LOG "the debug build's full log in a release build" OFF)
 option(SCDA_CHECK_ONLY "compile the port's own sources only: no recompiled code, no executable" OFF)
 set(SCDA_GPU null CACHE STRING
-    "renderer: vk (Vulkan 1.3 with shader objects), gl (OpenGL 4.3), or null (draws nothing, for testing the rest)")
+    "renderer: vk (Vulkan 1.3 with shader objects), gl (OpenGL 4.3), dk (deko3d, the Switch only), or null (draws nothing, for testing the rest)")
 # the Switch's Vulkan: mesa-switch's static NVK, installed as a portlibs tree (../mesa-build/build-linux.sh)
 set(SCDA_NVK_SDK "" CACHE PATH "Switch, SCDA_GPU=vk: the Mesa Horizon SDK's portlibs/switch (lib/libvulkan.a)")
 set(SCDA_GEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/generated/game CACHE PATH "generated code of default.xbe")
@@ -91,14 +91,20 @@ else()
 endif()
 # gl: gpu_gl.cpp, with vk_shader.cpp's HLSL to SPIR-V that SPIRV-Cross turns into GLSL; vk: gpu_vk.cpp on vk_device.cpp,
 # the SPIR-V as it is
+# dk: gpu_dk.cpp, vk_shader.cpp's SPIR-V as GLSL for uam (dk_shader.cpp)
 if(SCDA_GPU STREQUAL "null")
-    list(FILTER HOST_SOURCES EXCLUDE REGEX "/src/port/(gpu_gl|gpu_vk|gpu_common|gl_|vk_).*\\.cpp$")
+    list(FILTER HOST_SOURCES EXCLUDE REGEX "/src/port/(gpu_gl|gpu_vk|gpu_dk|gpu_common|gl_|vk_|dk_).*\\.cpp$")
 elseif(SCDA_GPU STREQUAL "gl")
-    list(FILTER HOST_SOURCES EXCLUDE REGEX "/src/port/(gpu_null|gpu_vk|vk_device)\\.cpp$")
+    list(FILTER HOST_SOURCES EXCLUDE REGEX "/src/port/(gpu_null|gpu_vk|gpu_dk|vk_device|dk_.*)\\.cpp$")
 elseif(SCDA_GPU STREQUAL "vk")
-    list(FILTER HOST_SOURCES EXCLUDE REGEX "/src/port/(gpu_null|gpu_gl|gl_.*)\\.cpp$")
+    list(FILTER HOST_SOURCES EXCLUDE REGEX "/src/port/(gpu_null|gpu_gl|gpu_dk|gl_.*|dk_.*)\\.cpp$")
+elseif(SCDA_GPU STREQUAL "dk")
+    if(NOT SCDA_SWITCH)
+        message(FATAL_ERROR "SCDA_GPU=dk is the Switch's deko3d: build it with the Switch toolchain")
+    endif()
+    list(FILTER HOST_SOURCES EXCLUDE REGEX "/src/port/(gpu_null|gpu_gl|gpu_vk|vk_device|gl_.*)\\.cpp$")
 else()
-    message(FATAL_ERROR "SCDA_GPU is vk, gl or null, not ${SCDA_GPU}")
+    message(FATAL_ERROR "SCDA_GPU is vk, gl, dk or null, not ${SCDA_GPU}")
 endif()
 file(GLOB GAME_SOURCES CONFIGURE_DEPENDS src/game/*.cpp)
 
@@ -140,10 +146,23 @@ if(NOT SCDA_GPU STREQUAL "null")
     set(SPIRV_CROSS_SKIP_INSTALL ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(glslang SPIRV-Cross)
     set(GPU_LIBS glslang SPIRV glslang-default-resource-limits)
-    if(SCDA_GPU STREQUAL "gl")
+    if(SCDA_GPU STREQUAL "gl" OR SCDA_GPU STREQUAL "dk")
         list(APPEND GPU_LIBS spirv-cross-glsl spirv-cross-core)
     endif()
-    if(SCDA_SWITCH AND SCDA_GPU STREQUAL "gl")
+    if(SCDA_GPU STREQUAL "dk")
+        # uam, devkitPro's deko3d shader compiler, as a library with SwitchWakerHD's patches (its PATCHES.md: no exit
+        # on errors, DKSH in memory, deterministic scheduling); third_party/uam for builds without network
+        if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/uam/CMakeLists.txt)
+            set(FETCHCONTENT_SOURCE_DIR_UAM ${CMAKE_CURRENT_SOURCE_DIR}/third_party/uam)
+        endif()
+        FetchContent_Declare(uam
+            URL https://github.com/centollOS/SwitchWakerHD/archive/2d147aaaa27b1ad0f9b390eff515609af9fe24a3.tar.gz
+            SOURCE_SUBDIR runtime/third_party/uam)
+        FetchContent_MakeAvailable(uam)
+        list(APPEND GPU_LIBS uamlib deko3d nx stdc++ m)
+        # SDL2's EGL references answered by stubs (as for NVK): libEGL.a's Mesa would clash with uam's
+        list(APPEND HOST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/port/switch_stubs.c)
+    elseif(SCDA_SWITCH AND SCDA_GPU STREQUAL "gl")
         # switch-sdl2's GL is EGL on switch-mesa (nouveau); the functions come from SDL_GL_GetProcAddress
         list(APPEND GPU_LIBS EGL glapi drm_nouveau)
         set(GPU_INCLUDES $ENV{DEVKITPRO}/portlibs/switch/include)
@@ -176,7 +195,7 @@ target_include_directories(scda SYSTEM PRIVATE ${imgui_SOURCE_DIR} ${GPU_INCLUDE
 target_compile_options(scda PRIVATE -fno-strict-aliasing -Wno-unused-parameter)
 target_compile_definitions(scda PRIVATE SCDA_PORT $<$<BOOL:${SCDA_VERBOSE_LOG}>:SCDA_VERBOSE_LOG>
     "SCDA_CODE_OPT_NAME=\"${SCDA_CODE_OPT}\""
-    $<$<STREQUAL:${SCDA_GPU},gl>:SCDA_GL> $<$<STREQUAL:${SCDA_GPU},vk>:SCDA_VK>
+    $<$<STREQUAL:${SCDA_GPU},gl>:SCDA_GL> $<$<STREQUAL:${SCDA_GPU},vk>:SCDA_VK> $<$<STREQUAL:${SCDA_GPU},dk>:SCDA_DK>
     $<$<AND:$<STREQUAL:${SCDA_GPU},vk>,$<NOT:$<BOOL:${SCDA_SWITCH}>>>:SCDA_SDL_VULKAN>)
 target_link_libraries(scda PRIVATE tomlplusplus::tomlplusplus SDL2::SDL2 ${GPU_LIBS} Threads::Threads)
 if(SCDA_CODE_LTO)

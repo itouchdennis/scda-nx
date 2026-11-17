@@ -15,9 +15,10 @@
 #                  default only the NRO is staged and the disc is copied to the card once by hand
 #   SD_ROOT        staging SD root (default switch_sd/); a scda.nro already there that differs from the new one is
 #                  moved to <SD_ROOT>/BAK/scda_v<its version>.nro first, beside switch/ so it stays off the card
-#   BUILD_DIR      default build/switch-vk, build/switch for SCDA_GPU=gl
+#   BUILD_DIR      default build/switch-vk, build/switch-dk for SCDA_GPU=dk, build/switch for SCDA_GPU=gl
 #   SCDA_ICON      the NRO's hbmenu icon, a 256x256 JPEG (default switch/icon.jpg when it exists)
-#   SCDA_GPU       vk (default, Vulkan on mesa-switch's NVK), gl (OpenGL on switch-mesa) or null (draws nothing)
+#   SCDA_GPU       vk (default, Vulkan on mesa-switch's NVK), dk (deko3d, the Switch's own API; no NVK needed),
+#                  gl (OpenGL on switch-mesa) or null (draws nothing)
 #   SCDA_NVK_SDK   vk: the Mesa Horizon SDK's portlibs/switch (default build/nvk-sdk/opt/devkitpro/portlibs/switch,
 #                  where switch/nvk/build-nvk.sh installs it)
 #   (logging: off by default, "logging = true" in sdmc:/switch/scda/scda.toml writes the full log to logs/)
@@ -32,7 +33,7 @@ GEN="${SCDA_GEN_DIR:-$REPO/generated/game}"
 GAME="${SCDA_GAME_SRC:-$REPO/assets}"
 SD="${SD_ROOT:-$REPO/switch_sd}"
 GPU="${SCDA_GPU:-vk}"
-BUILD="${BUILD_DIR:-$REPO/build/switch$([ "$GPU" = vk ] && echo -vk)}"
+BUILD="${BUILD_DIR:-$REPO/build/switch$( [ "$GPU" = vk ] && echo -vk; [ "$GPU" = dk ] && echo -dk)}"
 NVK="${SCDA_NVK_SDK:-$REPO/build/nvk-sdk/opt/devkitpro/portlibs/switch}"
 
 fail() { echo "error: $*" >&2; exit 1; }
