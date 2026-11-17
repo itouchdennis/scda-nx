@@ -3,6 +3,7 @@
 #include <spirv_glsl.hpp>
 
 #include <cstring>
+#include <atomic>
 #include <mutex>
 
 #include "core/log.h"
@@ -92,6 +93,15 @@ bool CompileHlsl(const std::string& hlsl, const char* entry, vk::Stage stage, Dk
         return false;
     }
     out.bytes = std::move(r.dksh);
+    // diagnostic: the first shaders' GLSL and pairs
+    static std::atomic<int> logged{0};
+    if (logged++ < 10) {
+        std::string pairs;
+        for (uint32_t k = 0; k < out.pair_count; k++)
+            pairs += " t" + std::to_string(out.pairs[k].texture) + "/s" + std::to_string(out.pairs[k].sampler);
+        LOGI("dk: %s shader GLSL (pairs:%s):\n%s", stage == vk::Stage::Vertex ? "vertex" : "pixel", pairs.c_str(),
+             glsl.c_str());
+    }
     return !out.bytes.empty();
 }
 

@@ -235,10 +235,9 @@ bool VertexFormat(uint32_t f, DkVtxAttribState& a) {
         case DXGI_FORMAT_R32G32_FLOAT: a.size = DkVtxAttribSize_2x32; a.type = DkVtxAttribType_Float; return true;
         case DXGI_FORMAT_R32G32B32_FLOAT: a.size = DkVtxAttribSize_3x32; a.type = DkVtxAttribType_Float; return true;
         case DXGI_FORMAT_R32G32B32A32_FLOAT: a.size = DkVtxAttribSize_4x32; a.type = DkVtxAttribType_Float; return true;
-        case DXGI_FORMAT_B8G8R8A8_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_UNORM:  // swapped to RGBA by UploadVertices
             a.size = DkVtxAttribSize_4x8;
             a.type = DkVtxAttribType_Unorm;
-            a.isBgra = 1;
             return true;
         case DXGI_FORMAT_R16_SNORM: a.size = DkVtxAttribSize_1x16; a.type = DkVtxAttribType_Snorm; return true;
         case DXGI_FORMAT_R16G16_SNORM: a.size = DkVtxAttribSize_2x16; a.type = DkVtxAttribType_Snorm; return true;
@@ -505,6 +504,7 @@ private:
     const DkShader* bound_vs_ = nullptr;
     const DkShader* bound_ps_ = nullptr;
     std::array<DkVtxAttribState, 16> vin_attr_{};
+    std::vector<uint8_t> vtx_tmp_;
     std::array<DkVtxBufferState, 16> vin_bind_{};
     uint32_t vin_attrs_ = 0, vin_binds_ = 0;
     bool vin_set_ = false;
@@ -1759,7 +1759,8 @@ uint32_t DkBackend::FeedbackCopy(Target& t) {
     Outside();
     DkImageView s = LevelView(t.img, 0), d = LevelView(t.fb, 0);
     DkImageRect r = {0, 0, 0, t.w, t.h, 1};
-    dkCmdBufCopyImage(Cmd(), &s, &r, &d, &r, 0);
+    // the 2D engine, as every other copy between render targets
+    dkCmdBufBlitImage(Cmd(), &s, &r, &d, &r, 0, 0);
     pending_ = true;
     return t.fb.desc;
 }
@@ -2052,7 +2053,24 @@ bool DkBackend::UploadVertices(const Assembled& a, Vertices& v) {
             return false;
         }
         Alloc vb = Upload(size_t(need), 16);
-        if (b.src) std::memcpy(vb.cpu, b.src, b.bytes);
+        // D3DCOLOR elements (B8G8R8A8) with R and B swapped here, read as RGBA8: deko3d's BGRA attribute flag is not
+        // relied on
+        bool bgra = false;
+        for (int r = 0; r < 16 && !bgra; r++) {
+            bgra = ((a.regs >> r) & 1) && a.elements[size_t(r)].buffer == i &&
+                   a.elements[size_t(r)].format == DXGI_FORMAT_B8G8R8A8_UNORM;
+        }
+        if (bgra && b.src && b.stride) {
+            vtx_tmp_.assign(static_cast<const uint8_t*>(b.src), static_cast<const uint8_t*>(b.src) + b.bytes);
+            for (int r = 0; r < 16; r++) {
+                const VertexElement& e = a.elements[size_t(r)];
+                if (!((a.regs >> r) & 1) || e.buffer != i || e.format != DXGI_FORMAT_B8G8R8A8_UNORM) continue;
+                for (size_t at = e.offset; at + 4 <= vtx_tmp_.size(); at += b.stride) std::swap(vtx_tmp_[at], vtx_tmp_[at + 2]);
+            }
+            std::memcpy(vb.cpu, vtx_tmp_.data(), b.bytes);
+        } else if (b.src) {
+            std::memcpy(vb.cpu, b.src, b.bytes);
+        }
         if (need > b.bytes) std::memset(vb.cpu + b.bytes, 0, size_t(need - b.bytes));
         v.buf[i] = {vb.gpu, uint32_t(need)};
     }
